@@ -130,6 +130,9 @@
       const formStaff = document.getElementById("form-staff-login");
       const loginAlert = document.getElementById("login-alert");
       const regAlert = document.getElementById("reg-alert");
+      const params = new URLSearchParams(location.search);
+      const booking = params.get("next") === "reservations";
+      const customerDestination = booking ? "reservations.html" : "customer-center.html";
 
       function showBox(el, type, msg) {
         el.innerHTML = `<div class="callout callout-${type}">${App.escapeHtml(msg)}</div>`;
@@ -151,9 +154,11 @@
         loginAlert.innerHTML = "";
       };
 
-      if (new URLSearchParams(location.search).get("role") === "staff") {
+      if (params.get("role") === "staff") {
         tabStaff.click();
         showBox(loginAlert, "info", "Sign in with your staff account to open your workspace.");
+      } else if (booking) {
+        showBox(loginAlert, "info", "Sign in or create a guest account to book a table.");
       }
 
 
@@ -178,8 +183,8 @@
         st.loggedInEmployee = null;
         st.currentCustomerId = cust.customer_id;
         App.commit(st);
-        showBox(loginAlert, "ok", `Welcome back, ${cust.name}. Opening your account…`);
-        setTimeout(() => (window.location.href = "customer-center.html"), 700);
+        showBox(loginAlert, "ok", `Welcome back, ${cust.name}.`);
+        setTimeout(() => location.replace(customerDestination), 700);
       });
 
       // Staff ID + Password Login -> role-based redirect
@@ -266,7 +271,7 @@
           st.db.CUSTOMER.push(newCust);
           st.db.CUSTOMER_PHONE.push({ customer_id: newCid, phone });
 
-          let memMsg = ". You can book a table or order by QR code as a guest";
+          let memMsg = "";
           if (joinLoyalty) {
             const newMid = App.nextId(st.db.MEMBERSHIP, "membership_id", 3031);
             st.db.MEMBERSHIP.push({
@@ -284,8 +289,8 @@
             st.loggedInEmployee = null;
             st.currentCustomerId = newCid;
             App.commit(st);
-            showBox(regAlert, "ok", `Account created${memMsg}. Opening your account…`);
-            setTimeout(() => (window.location.href = "customer-center.html"), 900);
+            showBox(regAlert, "ok", `Account created${memMsg}.`);
+            setTimeout(() => location.replace(customerDestination), 900);
           } else {
             App.commit(st);
             showBox(regAlert, "ok", `Account created${memMsg}. Sign in with your phone number and password.`);

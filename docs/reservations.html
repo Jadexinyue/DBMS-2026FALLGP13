@@ -58,7 +58,7 @@
         <div class="card-header">
           <div>
             <h2>Book a table</h2>
-            <div class="card-sub">Guests can book without an account. Availability is checked when you submit.</div>
+            <div class="card-sub">Availability is checked when you submit.</div>
           </div>
         </div>
 
@@ -112,6 +112,15 @@
   <script>
     (function () {
       const App = window.SmartDineApp;
+      function requireCustomer(state) {
+        if (state.loggedInCustomer) return true;
+        location.replace("auth.html?next=reservations");
+        return false;
+      }
+      const state = App.getState();
+      if (!requireCustomer(state)) return;
+      document.getElementById("r-name").value = state.loggedInCustomer.name;
+      document.getElementById("r-phone").value = state.loggedInCustomer.primary_phone;
       const tbody = document.getElementById("res-tbody");
       const searchEl = document.getElementById("res-search");
       const statusEl = document.getElementById("res-status");
@@ -139,7 +148,7 @@
         alertEl.innerHTML = selectAvailableSlot() ? "" : '<div class="callout callout-warn">No time slots remain for this date. Choose another day.</div>';
       };
       function canView(r, st) {
-        return st.loggedInCustomer ? r.customer_id === st.loggedInCustomer.customer_id : r.guestBooking === true;
+        return Boolean(st.loggedInCustomer) && r.customer_id === st.loggedInCustomer.customer_id;
       }
       function render() {
         const st = App.getState();
@@ -194,6 +203,12 @@
 
       document.getElementById("form-reservation").addEventListener("submit", (e) => {
         e.preventDefault();
+        App.businessAction(saveReservation);
+      });
+
+      function saveReservation() {
+        const st = App.getState();
+        if (!requireCustomer(st)) return;
         const name = document.getElementById("r-name").value.trim();
         const date = document.getElementById("r-date").value;
         const time = document.getElementById("r-time").value;
@@ -216,7 +231,6 @@
           return;
         }
         const slot = `${date} ${time}`;
-        const st = App.getState();
         const booked = st.db.RESERVATION.filter((r) => r.reserved_for === slot && r.status === "Confirmed").reduce(
           (s, r) => s + Number(r.party_size),
           0
@@ -228,10 +242,9 @@
         const newId = App.nextId(st.db.RESERVATION, "reservation_id", 4036);
         const rec = {
           reservation_id: newId,
-          customer_id: st.loggedInCustomer ? st.loggedInCustomer.customer_id : null,
+          customer_id: st.loggedInCustomer.customer_id,
           contact_name: name,
           contact_phone: phone,
-          guestBooking: !st.loggedInCustomer,
           reserved_for: slot,
           party_size: party,
           status: "Confirmed",
@@ -244,7 +257,7 @@
         searchEl.value = "";
         statusEl.value = "ALL";
         render();
-      });
+      }
 
       searchEl.addEventListener("input", render);
       statusEl.addEventListener("change", render);
