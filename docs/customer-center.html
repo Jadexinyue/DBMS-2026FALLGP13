@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My dining — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <section class="between">
+      <div>
+        <h1 style="font-family:var(--font-serif); font-size:26px;">My dining</h1>
+        <p class="card-sub">Track your dishes, view receipts and review your visits.</p>
+      </div>
+      <div class="row">
+        <a class="btn btn-primary" href="qr-order.html">Order more items</a>
+        <a class="btn btn-ok" href="cashier.html?mode=self">Table bill</a>
+      </div>
+    </section>
+
+    <!-- User Profile & Membership Summary -->
+    <section class="grid-3">
+      <div class="card">
+        <div class="badge badge-burgundy" style="margin-bottom:8px;">Guest profile</div>
+        <h2 id="cust-name" style="font-family:var(--font-serif);">--</h2>
+        <div class="card-sub" id="cust-meta" style="margin-top:6px;">--</div>
+      </div>
+
+      <div class="card" style="background:linear-gradient(135deg, #FBF4E7, #FFFFFF);">
+        <div class="badge badge-gold" style="margin-bottom:8px;">Rewards points</div>
+        <div style="font-family:var(--font-serif); font-size:32px; font-weight:700; color:var(--burgundy);" id="mem-points">--</div>
+        <div class="card-sub" id="mem-meta">Redeem 100 points for $10.00 off at checkout.</div>
+      </div>
+
+      <div class="card">
+        <div class="badge badge-info" style="margin-bottom:8px;">Current table</div>
+        <h3 id="active-sess-title" style="margin-bottom:6px;">--</h3>
+        <div class="card-sub" id="active-sess-sub">--</div>
+      </div>
+    </section>
+
+    <!-- Section 1: In-Progress Order (P06 / Hand-drawn p.5 "Preparing") -->
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2>Order progress</h2>
+        </div>
+        <div id="live-order-actions"></div>
+      </div>
+      <div id="live-order-body"></div>
+    </section>
+
+    <div class="grid-2">
+      <!-- Section 2: Completed Orders & Review Submission (P10 / Hand-drawn p.5) -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Dining history</h2>
+            <div class="card-sub">Receipts are available after payment. You can leave one review per visit after you leave.</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Table</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+            <tbody id="hist-orders-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 3: Loyalty Points Ledger -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Points history</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Transaction</th>
+                <th>Order</th>
+                <th>Earned</th>
+                <th>Redeemed</th>
+                <th>Net change</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="pts-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Section 4: Reviews + Manager Reply Placeholder (Hand-drawn p.5) -->
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2>My reviews and restaurant replies</h2>
+        </div>
+      </div>
+      <div id="reviews-list" class="stack"></div>
+    </section>
+  </main>
+
+  <!-- Review Modal (Hand-drawn p.5 popup) -->
+  <div class="modal-backdrop" id="rv-modal">
+    <div class="modal-box" style="max-width:460px;">
+      <div class="card-header">
+        <div>
+          <h2>Review your visit</h2>
+          <div class="card-sub" id="rv-modal-sub"></div>
+        </div>
+        <button class="btn btn-sm btn-secondary" id="rv-close" type="button">Close</button>
+      </div>
+      <form id="form-review">
+        <input type="hidden" id="rv-session-id" />
+        <div class="form-group">
+          <label for="rv-rating">Rating (1–5 stars) *</label>
+          <select id="rv-rating">
+            <option value="5">★★★★★ 5 — Excellent</option>
+            <option value="4" selected>★★★★☆ 4 — Good</option>
+            <option value="3">★★★☆☆ 3 — Average</option>
+            <option value="2">★★☆☆☆ 2 — Needs improvement</option>
+            <option value="1">★☆☆☆☆ 1 — Poor</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="rv-comment">Your review *</label>
+          <textarea id="rv-comment" rows="3" placeholder="Tell us about your meal and service…"></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%;">Submit review</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      const rvModal = document.getElementById("rv-modal");
+
+      function render() {
+        const st = App.getState();
+        const cust = st.loggedInCustomer && App.getCustomer(st.loggedInCustomer.customer_id);
+        const mem = cust && App.getMembershipByCustomer(cust.customer_id);
+        document.getElementById("cust-name").textContent = cust ? cust.name : "Guest";
+        document.getElementById("cust-meta").textContent = cust ? "Account phone: " + cust.primary_phone : "This device shows the most recent table you scanned. Sign in to see your dining history and rewards.";
+        if (mem) {
+          document.getElementById("mem-points").textContent = `${App.countLabel(mem.points_balance, "point")}`;
+          document.getElementById("mem-meta").textContent = `Member #${mem.membership_id} · ${App.memberTier(mem)} member · Joined ${mem.joined_at}`;
+        } else {
+          document.getElementById("mem-points").textContent = "Non-member";
+          document.getElementById("mem-meta").textContent = "You can book, order and review your visit as a guest.";
+        }
+
+        // Active table order for current QR table (default T09 -> #9003)
+        const tbl = App.getTable(App.qrBinding().tableId);
+        const bound = App.qrSession();
+        const activeSess = bound?.session_status === "Active" ? bound : null;
+        const activeOrd = activeSess ? App.getOrderForSession(activeSess.session_id) : null;
+
+        if (activeSess) {
+          document.getElementById("active-sess-title").textContent = `${tbl.table_number} · Session #${activeSess.session_id}`;
+          document.getElementById("active-sess-sub").innerHTML =
+            `Table status ${App.statusBadge(tbl.table_status)} · ${activeOrd ? `Order #${activeOrd.order_id} (${App.statusLabel(activeOrd.order_status)})` : "No order yet"}`;
+        } else {
+          document.getElementById("active-sess-title").textContent = tbl ? `${tbl.table_number} · This visit has ended or the table code has expired` : "No table linked";
+          document.getElementById("active-sess-sub").textContent = "Scan your table code after you are seated.";
+        }
+
+        // Render Live Order Body
+        const liveBody = document.getElementById("live-order-body");
+        const liveAct = document.getElementById("live-order-actions");
+        if (activeOrd && activeOrd.order_status === "Open") {
+          const sum = App.calcOrderSummary(activeOrd.order_id);
+          const subs = App.getSubOrdersForOrder(activeOrd.order_id);
+          liveAct.innerHTML = `<a class="btn btn-ok btn-sm" href="cashier.html?mode=self&order=${activeOrd.order_id}">💳 Check out (${App.formatMoney(sum.totalBeforeTip)} + optional tip)</a>`;
+          liveBody.innerHTML = `
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Round / source</th><th>Item ID</th><th>Item</th><th>Station</th><th>Notes</th><th class="num">Unit price</th><th>Kitchen status</th></tr>
+                </thead>
+                <tbody>
+                  ${subs
+                    .map((s, idx) =>
+                      sum.items
+                        .filter((i) => i.sub_order_id === s.sub_order_id)
+                        .map((i) => {
+                          const mi = App.getMenuItem(i.menu_item_id);
+                          const sta = mi ? App.getStation(mi.station_id) : null;
+                          const emp = s.employee_id ? App.getEmployee(s.employee_id) : null;
+                          return `
+                            <tr>
+                              <td><strong>Round ${idx + 1}</strong> (#${s.sub_order_id})<br/><span class="form-hint">${s.channel === "QR_Code" ? "Guest QR" : "Server " + (emp ? emp.employee_name : s.employee_id)}</span></td>
+                              <td class="mono">#${i.order_item_id}</td>
+                              <td><strong>${mi ? mi.item_name : "#" + i.menu_item_id}</strong></td>
+                              <td>${sta ? sta.station_name : ""}</td>
+                              <td>${App.escapeHtml(i.notes) || '<span class="form-hint">None</span>'}</td>
+                              <td class="num">${App.formatMoney(i.unit_price)}</td>
+                              <td>${App.statusBadge(i.item_status)}</td>
+                            </tr>
+                          `;
+                        })
+                        .join("")
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+            <div class="between" style="margin-top:12px;">
+              <span class="form-hint">Subtotal ${App.formatMoney(sum.subtotal)} − Discount ${App.formatMoney(sum.discount)} + 8% tax ${App.formatMoney(sum.tax)}</span>
+              <strong>Total before tip: <span style="color:var(--burgundy); font-size:17px;">${App.formatMoney(sum.totalBeforeTip)}</span></strong>
+            </div>
+          `;
+        } else {
+          liveAct.innerHTML = "";
+          liveBody.innerHTML = '<p class="form-hint">No open order.</p>';
+        }
+
+        const histOrders = App.customerReceipts();
+
+        const histTbody = document.getElementById("hist-orders-tbody");
+        if (!histOrders.length) {
+          histTbody.innerHTML = '<tr><td colspan="5" class="form-hint">No paid orders yet.</td></tr>';
+        } else {
+          histTbody.innerHTML = histOrders
+            .map((o) => {
+              const s = st.db.DINING_SESSION.find((ds) => ds.session_id === o.session_id);
+              const t = s ? App.getTable(s.table_id) : null;
+              const sum = App.calcOrderSummary(o.order_id);
+              const rev = st.db.REVIEW.find((r) => r.session_id === o.session_id);
+              return `
+                <tr>
+                  <td class="mono"><a href="cashier.html?mode=history&order=${o.order_id}">Receipt #${o.order_id}</a></td>
+                  <td>${t ? t.table_number : "-"}</td>
+                  <td class="num">${App.formatMoney(sum.grandTotal)}<br/><span class="form-hint">Including tip ${App.formatMoney(sum.tip)}</span></td>
+                  <td>${App.statusBadge(o.order_status)}</td>
+                  <td>
+                    ${
+                      rev
+                        ? `<span class="badge badge-ok">Reviewed (${rev.rating}★)</span>`
+                        : s?.session_status !== "Completed" ? '<span class="form-hint">Review after departure</span>' : `<button class="btn btn-sm btn-gold open-rv-btn" data-sess="${o.session_id}" data-ord="${o.order_id}">Write a review</button>`
+                    }
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          histTbody.querySelectorAll(".open-rv-btn").forEach((b) => {
+            b.onclick = () => {
+              document.getElementById("rv-session-id").value = b.dataset.sess;
+              document.getElementById("rv-modal-sub").textContent = `Order #${b.dataset.ord} · Dining session #${b.dataset.sess} (one review per visit)`;
+              document.getElementById("rv-comment").value = "";
+              rvModal.classList.add("open");
+            };
+          });
+        }
+
+        // Points Ledger
+        const ptsTbody = document.getElementById("pts-tbody");
+        const ptsList = mem ? st.db.POINT_TRANSACTION.filter((p) => p.membership_id === mem.membership_id) : [];
+        ptsTbody.innerHTML = ptsList.length
+          ? ptsList
+              .map(
+                (p) => `
+              <tr>
+                <td class="mono">#${p.point_txn_id}</td>
+                <td class="mono">#${p.order_id}</td>
+                <td style="color:var(--ok-text); font-weight:700;">+${p.earned_points}</td>
+                <td style="color:var(--danger-text);">-${p.redeemed_points}</td>
+                <td><strong>${p.net_change >= 0 ? "+" : ""}${p.net_change}</strong></td>
+                <td class="mono">${p.created_at}</td>
+              </tr>`
+              )
+              .join("")
+          : `<tr><td colspan="6" class="form-hint">No points transactions yet.</td></tr>`;
+
+        // Reviews List
+        const rvBox = document.getElementById("reviews-list");
+        const custSessIds = new Set(histOrders.map(o => o.session_id));
+        const myRevs = st.db.REVIEW.filter(r => custSessIds.has(r.session_id));
+        rvBox.innerHTML = !myRevs.length ? '<p class="form-hint">No reviews yet.</p>' : myRevs
+          .map((r) => {
+            const reply = st.placeholders.reviewReplies[r.review_id];
+            return `
+              <div style="border:1px solid var(--border); border-radius:10px; padding:14px;">
+                <div class="between" style="margin-bottom:6px;">
+                  <div><strong>Review #${r.review_id}</strong> · Session #${r.session_id} · <span style="color:var(--gold);">${"★".repeat(r.rating)}${"☆".repeat(5 - r.rating)}</span></div>
+                  <span class="mono form-hint">${r.created_at}</span>
+                </div>
+                <p style="margin:0 0 8px;">${App.escapeHtml(r.comment)}</p>
+                ${
+                  reply
+                    ? `<div class="callout callout-gold" style="padding:8px 12px;"><strong>Restaurant reply: </strong>${App.escapeHtml(reply)}</div>`
+                    : ""
+                }
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      document.getElementById("rv-close").onclick = () => rvModal.classList.remove("open");
+      document.getElementById("form-review").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const sessId = Number(document.getElementById("rv-session-id").value);
+        const rating = Number(document.getElementById("rv-rating").value);
+        const comment = document.getElementById("rv-comment").value.trim();
+        if (!comment) {
+          App.toast("Write a review before submitting.", "err");
+          return;
+        }
+        const st = App.getState();
+        const paid = st.db.ORDER.find(o => o.session_id === sessId && o.order_status === "Paid");
+        const session = st.db.DINING_SESSION.find(s => s.session_id === sessId);
+        const customer = st.loggedInCustomer;
+        const ownBooking = customer && st.db.RESERVATION.some(r => r.customer_id === customer.customer_id && r.reservation_id === session?.reservation_id);
+        const member = customer && App.getMembershipByCustomer(customer.customer_id);
+        const ownPoints = member && st.db.POINT_TRANSACTION.some(p => p.membership_id === member.membership_id && p.order_id === paid?.order_id);
+        if (session?.session_status !== "Completed") return App.toast("You can review this visit after you leave.", "err");
+        if (!paid || !(sessId === App.qrSession()?.session_id || ownBooking || ownPoints)) return App.toast("Select a paid order from this visit.", "err");
+        if (st.db.REVIEW.some((r) => r.session_id === sessId)) {
+          App.toast("You have already reviewed this visit.", "err");
+          return;
+        }
+        const newRid = sessId === 6003 ? 8003 : App.nextId(st.db.REVIEW, "review_id", 8031);
+        st.db.REVIEW.push({
+          review_id: newRid,
+          session_id: sessId,
+          rating,
+          comment,
+          created_at: App.nowStamp(),
+        });
+        App.commit(st);
+        rvModal.classList.remove("open");
+        App.toast("Thank you for your review.", "ok");
+        render();
+      });
+
+      App.initShell({
+        mode: "public",
+        activePage: "customer-center",
+
+        dbRole: "customer",
+        onStateChange: render,
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

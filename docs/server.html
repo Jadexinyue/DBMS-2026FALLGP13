@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Server station — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Server station</h1>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-ok" id="top-go-cashier" href="cashier.html">Open checkout</a>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- Ready-to-Serve Alert Bar (Hand-drawn p.10 "Ready dishes" + Spec FR-K05) -->
+        <section class="card" style="border-left:4px solid var(--ok-text); background:#F5FCF7;">
+          <div class="card-header">
+            <div>
+              <h2>Ready to serve</h2>
+            </div>
+            <span class="badge badge-ok" id="ready-count-badge">0 ready</span>
+          </div>
+          <div id="ready-items-row" class="row"></div>
+        </section>
+
+        <div class="grid-main-side">
+          <!-- Left: Active Table Order Rounds & Cancel / Modify Controls -->
+          <section class="stack">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Occupied tables</h2>
+                </div>
+                <div class="row">
+                  <label for="pos-emp-sel" style="font-size:12.5px; font-weight:600;">Server: </label>
+                  <select id="pos-emp-sel" style="width:190px;"></select>
+                </div>
+              </div>
+              <div class="row" id="active-tables-bar" style="margin-bottom:14px;"></div>
+              <div id="pos-order-detail"></div>
+            </div>
+          </section>
+
+          <!-- Right: Staff POS Quick Add Round (SUB_ORDER channel = Staff_POS) -->
+          <aside class="card">
+            <div class="card-header">
+              <div>
+                <h2>Order for a table</h2>
+                <div class="card-sub">These items will be added to the table’s bill.</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <input type="text" id="pos-menu-search" placeholder="Search menu…" />
+            </div>
+
+            <div id="pos-menu-list" class="stack" style="gap:8px; max-height:360px; overflow-y:auto; margin-bottom:14px;"></div>
+
+            <div style="border-top:1px solid var(--border); padding-top:12px;">
+              <div class="between" style="margin-bottom:8px;">
+                <strong>This round</strong>
+                <span class="badge badge-gold" id="pos-draft-cnt">0 items</span>
+              </div>
+              <div id="pos-draft-list" class="stack" style="gap:6px; margin-bottom:10px;"></div>
+              <div class="form-group">
+                <input type="text" id="pos-note" placeholder="Special instructions (e.g. no onions)" />
+              </div>
+              <button class="btn btn-primary" id="btn-pos-submit" type="button" style="width:100%;">
+                Send to kitchen
+              </button>
+            </div>
+          </aside>
+        </div>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let selectedTableId = Number(new URLSearchParams(location.search).get("table")) || 9;
+      let posSessionId;
+      let posDraft = []; // [{ menu_item_id, qty }]
+
+      function render() {
+        const st = App.getState();
+
+        // Populate server dropdown (role_id = 3 Servers)
+        const empSel = document.getElementById("pos-emp-sel");
+        {
+          const operator = App.workingEmployee();
+          const previous = operator?.employee_id || Number(empSel.value) || 109;
+          empSel.disabled = Boolean(operator);
+          const servers = st.db.EMPLOYEE.filter(e => e.employment_status === "Active" && (operator ? e.employee_id === operator.employee_id : [2,3].includes(e.role_id)));
+          empSel.innerHTML = servers
+            .map((e) => `<option value="${e.employee_id}" ${e.employee_id === previous ? "selected" : ""}>#${e.employee_id} ${e.employee_name}</option>`)
+            .join("");
+        }
+
+        // Ready items across all active orders
+        const readyItems = st.db.ORDER_ITEM.filter((i) => i.item_status === "READY");
+        document.getElementById("ready-count-badge").textContent = `${readyItems.length} ready`;
+        const readyBox = document.getElementById("ready-items-row");
+        if (!readyItems.length) {
+          readyBox.innerHTML = '<p class="form-hint">No items are ready to serve.</p>';
+        } else {
+          readyBox.innerHTML = readyItems
+            .map((i) => {
+              const sub = st.db.SUB_ORDER.find((s) => s.sub_order_id === i.sub_order_id);
+              const ord = sub ? st.db.ORDER.find((o) => o.order_id === sub.order_id) : null;
+              const sess = ord ? st.db.DINING_SESSION.find((ds) => ds.session_id === ord.session_id) : null;
+              const tbl = sess ? App.getTable(sess.table_id) : null;
+              const mi = App.getMenuItem(i.menu_item_id);
+              return `
+                <div style="border:1px solid var(--ok-border); background:#FFF; border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:12px;">
+                  <div>
+                    <div style="font-weight:700;">${tbl ? tbl.table_number : "?"} · Order #${ord ? ord.order_id : "?"}</div>
+                    <div style="font-size:13px;">${mi ? mi.item_name : "#" + i.menu_item_id} <span class="mono form-hint">(#${i.order_item_id})</span></div>
+                  </div>
+                  <button class="btn btn-sm btn-ok mark-served-btn" data-id="${i.order_item_id}" type="button">Mark served</button>
+                </div>
+              `;
+            })
+            .join("");
+          readyBox.querySelectorAll(".mark-served-btn").forEach((b) => {
+            b.onclick = () => App.businessAction(() => {
+              const r = App.advanceOrderItemStatus(Number(b.dataset.id), "SERVED");
+              App.toast(r.ok ? "Marked as served." : r.error, r.ok ? "ok" : "err");
+              render();
+            });
+          });
+        }
+
+        // Active sessions table chips
+        const activeSessions = st.db.DINING_SESSION.filter((s) => s.session_status === "Active");
+        const bar = document.getElementById("active-tables-bar");
+        if (!activeSessions.some((s) => s.table_id === selectedTableId) && activeSessions.length) {
+          selectedTableId = activeSessions[0].table_id;
+        }
+        bar.innerHTML = activeSessions.length
+          ? activeSessions
+              .map((s) => {
+                const t = App.getTable(s.table_id);
+                const o = App.getOrderForSession(s.session_id);
+                return `<button type="button" class="tab-btn ${selectedTableId === s.table_id ? "active" : ""}" data-tid="${s.table_id}">
+                  ${t.table_number} ${o ? "(#" + o.order_id + ")" : "(newly seated)"}
+                </button>`;
+              })
+              .join("")
+          : '<p class="form-hint">No active tables.</p>';
+
+        bar.querySelectorAll("button").forEach((b) => {
+          b.onclick = () => {
+            if (selectedTableId !== Number(b.dataset.tid)) posDraft = [];
+            selectedTableId = Number(b.dataset.tid);
+            render();
+          };
+        });
+
+        const sessionId = App.getActiveSessionForTable(selectedTableId)?.session_id;
+        if (posSessionId !== sessionId) {
+          posDraft = [];
+          document.getElementById("pos-note").value = "";
+          posSessionId = sessionId;
+        }
+        renderOrderDetail();
+        renderPosMenu();
+        renderPosDraft();
+      }
+
+      function renderOrderDetail() {
+        const box = document.getElementById("pos-order-detail");
+        const tbl = App.getTable(selectedTableId);
+        const sess = tbl ? App.getActiveSessionForTable(tbl.table_id) : null;
+        const ord = sess ? App.getOrderForSession(sess.session_id) : null;
+
+        if (!sess) {
+          box.innerHTML = `<div class="callout callout-info">Select an occupied table above.</div>`;
+          return;
+        }
+
+        document.getElementById("top-go-cashier").href = ord ? `cashier.html?order=${ord.order_id}` : "cashier.html";
+
+        if (!ord) {
+          box.innerHTML = `<div class="callout callout-info">Table <strong>${tbl.table_number}</strong> is seated (session #${sess.session_id}, ${App.countLabel(sess.guest_count, "guest")}). No items have been ordered yet.</div>`;
+          return;
+        }
+
+        const sum = App.calcOrderSummary(ord.order_id);
+        const subs = App.getSubOrdersForOrder(ord.order_id);
+        const isPaid = ord.order_status === "Paid";
+
+        box.innerHTML = `
+          <div class="between" style="margin-bottom:12px;">
+            <div>
+              <strong>${tbl.table_number} · Order #${ord.order_id}</strong> · Session #${sess.session_id} ${App.statusBadge(ord.order_status)}
+            </div>
+            <div class="row">
+              <strong>Total with tax: ${App.formatMoney(sum.totalBeforeTip)}</strong>
+              ${!isPaid ? `<a class="btn btn-sm btn-ok" href="cashier.html?order=${ord.order_id}">Check out</a>` : ""}
+            </div>
+          </div>
+
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Round / source</th><th>Item ID</th><th>Menu</th><th>Station</th><th>Unit price</th><th>Status</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                ${subs
+                  .map((s, idx) => {
+                    const emp = s.employee_id ? App.getEmployee(s.employee_id) : null;
+                    return sum.items
+                      .filter((i) => i.sub_order_id === s.sub_order_id)
+                      .map((i) => {
+                        const mi = App.getMenuItem(i.menu_item_id);
+                        const sta = mi ? App.getStation(mi.station_id) : null;
+                        let act = `<span class="form-hint">—</span>`;
+                        if (!isPaid && i.item_status === "READY") {
+                          act = `<button class="btn btn-sm btn-ok pos-serve" data-id="${i.order_item_id}">Mark served</button>`;
+                        } else if (!isPaid && i.item_status === "QUEUED") {
+                          act = `<button class="btn btn-sm btn-danger pos-cancel" data-id="${i.order_item_id}">Cancel item</button>`;
+                        }
+                        return `
+                          <tr style="${i.item_status === "CANCELLED" ? "opacity:0.5; text-decoration:line-through;" : ""}">
+                            <td><strong>R${idx + 1}</strong> #${s.sub_order_id}<br/><span class="form-hint">${s.channel === "QR_Code" ? "Tableside QR" : "POS · " + (emp ? emp.employee_name : s.employee_id)}</span></td>
+                            <td class="mono">#${i.order_item_id}</td>
+                            <td><strong>${mi ? mi.item_name : "#" + i.menu_item_id}</strong>${i.notes ? `<br/><span class="form-hint">Notes: ${App.escapeHtml(i.notes)}</span>` : ""}</td>
+                            <td>${sta ? sta.station_name : ""}</td>
+                            <td class="num">${App.formatMoney(i.unit_price)}</td>
+                            <td>${App.statusBadge(i.item_status)}</td>
+                            <td>${act}</td>
+                          </tr>
+                        `;
+                      })
+                      .join("");
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        box.querySelectorAll(".pos-serve").forEach((b) => {
+          b.onclick = () => App.businessAction(() => {
+            const r = App.advanceOrderItemStatus(Number(b.dataset.id), "SERVED");
+            App.toast(r.ok ? "Marked as served." : r.error, r.ok ? "ok" : "err");
+            render();
+          });
+        });
+        box.querySelectorAll(".pos-cancel").forEach((b) => {
+          b.onclick = () => App.businessAction(() => {
+            const r = App.cancelOrderItem(Number(b.dataset.id));
+            if (!r.ok) App.toast(r.error, "err");
+            else {
+              App.toast("Item cancelled. The bill has been updated.", "ok");
+              render();
+            }
+          });
+        });
+      }
+
+      function renderPosMenu() {
+        const st = App.getState();
+        const kw = document.getElementById("pos-menu-search").value.trim().toLowerCase();
+        const list = st.db.MENU_ITEM.filter((m) => !kw || m.item_name.toLowerCase().includes(kw));
+        document.getElementById("pos-menu-list").innerHTML = list
+          .map((m) => {
+            const soldOut = m.availability !== "Available";
+            return `
+              <div class="between" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px; ${soldOut ? "opacity:0.55;" : ""}">
+                <div>
+                  <div style="font-weight:600; font-size:13.5px;">${m.item_name}</div>
+                  <div class="form-hint">${App.formatMoney(m.current_price)} · ${App.getStation(m.station_id).station_name}</div>
+                </div>
+                ${
+                  soldOut
+                    ? App.statusBadge(m.availability)
+                    : `<button class="btn btn-sm btn-ghost pos-add" data-id="${m.menu_item_id}" type="button">+ Add</button>`
+                }
+              </div>
+            `;
+          })
+          .join("");
+
+        document.querySelectorAll(".pos-add").forEach((b) => {
+          b.onclick = () => {
+            const id = Number(b.dataset.id);
+            const hit = posDraft.find((x) => x.menu_item_id === id);
+            if (hit) hit.qty += 1;
+            else posDraft.push({ menu_item_id: id, qty: 1 });
+            renderPosDraft();
+          };
+        });
+      }
+
+      function renderPosDraft() {
+        const cnt = posDraft.reduce((s, x) => s + x.qty, 0);
+        document.getElementById("pos-draft-cnt").textContent = `${App.countLabel(cnt, "item")}`;
+        const box = document.getElementById("pos-draft-list");
+        if (!posDraft.length) {
+          box.innerHTML = `<div class="form-hint">No items added to this round.</div>`;
+          return;
+        }
+        box.innerHTML = posDraft
+          .map((d) => {
+            const m = App.getMenuItem(d.menu_item_id);
+            return `
+              <div class="between" style="font-size:13px;">
+                <span>${m.item_name} × ${d.qty}</span>
+                <button class="btn btn-sm btn-secondary pos-rem" data-id="${d.menu_item_id}" type="button">Remove</button>
+              </div>
+            `;
+          })
+          .join("");
+        box.querySelectorAll(".pos-rem").forEach((b) => {
+          b.onclick = () => {
+            posDraft = posDraft.filter((x) => x.menu_item_id !== Number(b.dataset.id));
+            renderPosDraft();
+          };
+        });
+      }
+
+      document.getElementById("btn-pos-submit").onclick = () => {
+        const empId = Number(document.getElementById("pos-emp-sel").value);
+        const note = document.getElementById("pos-note").value.trim();
+        const payload = posDraft.map((x) => ({ menu_item_id: x.menu_item_id, qty: x.qty, notes: note || null }));
+        const res = App.submitSubOrder({
+          tableId: selectedTableId,
+          sessionId: posSessionId || -1,
+          channel: "Staff_POS",
+          employeeId: empId,
+          cartItems: payload,
+        });
+        if (!res.ok) return App.toast(res.error, "err");
+        posDraft = [];
+        document.getElementById("pos-note").value = "";
+        App.toast(`Sent to kitchen: ${App.countLabel(res.count, "item")}.`, "ok");
+        render();
+      };
+
+      document.getElementById("pos-menu-search").addEventListener("input", renderPosMenu);
+
+      if (!App.initShell({
+        mode: "staff",
+        activePage: "server",
+
+        portalLabel: "Server station",
+
+        dbRole: "server",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

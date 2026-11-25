@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Operations management — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Operations</h1>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="manager-dashboard.html">← Manager overview</a>
+          <a class="btn btn-gold" href="manager-tips.html">Tip pools</a>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <section class="card">
+          <div class="tabs" id="ops-tabs">
+            <button class="tab-btn active" data-t="menu" type="button">Menu</button>
+            <button class="tab-btn" data-t="emp" type="button">Staff & shifts</button>
+            <button class="tab-btn" data-t="tbl" type="button">Tables</button>
+            <button class="tab-btn" data-t="mem" type="button">Members</button>
+          </div>
+
+          <!-- TAB 1: Menu & Dish Requests -->
+          <div id="pane-menu" class="stack">
+            <div class="callout callout-info">
+              Price changes apply to new orders.
+            </div>
+            <div class="grid-main-side">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Item</th><th>Category</th><th>Station</th><th class="num">Current price</th><th>Status</th><th>Action</th></tr>
+                  </thead>
+                  <tbody id="ops-menu-tbody"></tbody>
+                </table>
+              </div>
+              <div class="card" style="background:var(--surface-muted);">
+                <h3 style="margin-bottom:8px;">Menu and ingredient requests</h3>
+                <div id="ops-dr-list" class="stack" style="gap:8px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Employees & Soft Termination & Requests -->
+          <div id="pane-emp" style="display:none;" class="stack">
+            <div class="grid-main-side">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Employee ID</th><th>Name</th><th>Qualified roles</th><th>Supervisor</th><th>Status</th><th>Hours worked</th><th>Account action</th></tr>
+                  </thead>
+                  <tbody id="ops-emp-tbody"></tbody>
+                </table>
+              </div>
+              <div class="card" style="background:var(--surface-muted);">
+                <h3 style="margin-bottom:8px;">Staff requests</h3>
+                <div id="ops-sr-list" class="stack" style="gap:8px;"></div>
+              </div>
+            </div>
+            <section class="card stack" id="attendance">
+              <h3>Time entries</h3>
+              <label for="attendance-employee">Select employee</label><select id="attendance-employee"></select>
+              <div class="table-wrap"><table><thead><tr><th>Shift</th><th>Clock-in</th><th>Clock-out</th><th>Break</th><th>Net hours</th></tr></thead><tbody id="attendance-rows"></tbody></table></div>
+            </section>
+            <form id="shift-form" class="card stack">
+              <h3>Schedule a shift</h3>
+              <div class="form-row">
+                <label>Employee<select id="shift-employee" required></select></label>
+                <label>Shift role<select id="shift-role" required></select></label>
+              </div>
+              <div class="form-row">
+                <label>Start time<input type="datetime-local" id="shift-start" required></label>
+                <label>End time<input type="datetime-local" id="shift-end" required></label>
+              </div>
+              <button class="btn btn-primary" type="submit">Save shift</button>
+              <p class="form-hint" id="shift-result" role="status"></p>
+              <div id="shift-list" class="form-hint"></div>
+            </form>
+          </div>
+
+          <!-- TAB 3: Tables Maintenance & Turnover -->
+          <div id="pane-tbl" style="display:none;" class="stack">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Table</th><th>Capacity</th><th>QR code</th><th>Table status</th><th class="num">Visits</th><th>Condition</th><th>Maintenance</th></tr>
+                </thead>
+                <tbody id="ops-tbl-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB 4: Members Ranking (11-25 Single Login Phone) -->
+          <div id="pane-mem" style="display:none;" class="stack">
+            <div class="between">
+              <div id="mem-summary-badges" class="row"></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Rank</th><th>Member ID</th><th>Guest name</th><th>Phone</th><th>Tier</th><th class="num">Points</th><th>Member since</th></tr>
+                </thead>
+                <tbody id="ops-mem-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+
+      const shiftEmployee = document.getElementById("shift-employee");
+      const shiftRole = document.getElementById("shift-role");
+      function showShifts() {
+        const employee = App.getEmployee(shiftEmployee.value);
+        if (!employee) return;
+        const roles = new Set([employee.role_id, ...(employee.qualified_roles || [])]);
+        shiftRole.innerHTML = [...roles].map(id => `<option value="${id}">${App.getRole(id).role_name}</option>`).join("");
+        const list = App.getState().db.SHIFT.filter(s => s.employee_id === employee.employee_id && s.shift_status === "Scheduled")
+          .sort((a,b) => a.scheduled_start.localeCompare(b.scheduled_start));
+        document.getElementById("shift-list").textContent = list.length ?
+          list.map(s => s.scheduled_start + " – " + s.scheduled_end + " · " + App.getRole(s.role_id).role_name).join(" / ") : "No upcoming shifts";
+      }
+      shiftEmployee.onchange = showShifts;
+      document.getElementById("shift-form").onsubmit = event => {
+        event.preventDefault();
+        const st = App.getState(), employee = App.getEmployee(shiftEmployee.value);
+        const from = document.getElementById("shift-start").value.replace("T", " ") + ":00";
+        const to = document.getElementById("shift-end").value.replace("T", " ") + ":00";
+        const result = document.getElementById("shift-result");
+        const role = Number(shiftRole.value);
+        if (employee?.employment_status !== "Active" || ![employee.role_id,...(employee.qualified_roles || [])].includes(role)) {
+          result.textContent = "Select an active employee and a role they are qualified for."; return;
+        }
+        if (to <= from) { result.textContent = "End time must be later than start time."; return; }
+        if (st.db.SHIFT.some(s => s.employee_id === employee.employee_id && s.scheduled_start < to && from < s.scheduled_end)) {
+          result.textContent = "This employee already has a shift during that time. Choose another time."; return;
+        }
+        const id = App.nextId(st.db.SHIFT, "shift_id", 7041);
+        st.db.SHIFT.push({shift_id:id, employee_id:employee.employee_id, role_id:role, scheduled_start:from, scheduled_end:to, shift_status:"Scheduled"});
+        App.commit(st);
+        result.textContent = "Shift #" + id + " saved. The employee can view it in their profile.";
+        showShifts();
+      };
+      function render() {
+        const st = App.getState();
+        const selected = shiftEmployee.value;
+        shiftEmployee.innerHTML = st.db.EMPLOYEE.filter(e => e.employment_status === "Active")
+          .map(e => `<option value="${e.employee_id}">${e.employee_name}</option>`).join("");
+        if ([...shiftEmployee.options].some(o => o.value === selected)) shiftEmployee.value = selected;
+        showShifts();
+
+        // 1. Menu
+        document.getElementById("ops-menu-tbody").innerHTML = st.db.MENU_ITEM.map((m) => {
+          const avail = m.availability === "Available";
+          return `
+            <tr>
+              <td class="mono">#${m.menu_item_id}</td>
+              <td><strong>${m.item_name}</strong></td>
+              <td>${App.getCategory(m.category_id).category_name}</td>
+              <td>${App.getStation(m.station_id).station_name}</td>
+              <td class="num"><input type="number" step="0.50" min="1" value="${Number(m.current_price).toFixed(2)}" class="price-inp" data-id="${m.menu_item_id}" style="width:86px; padding:4px 6px; text-align:right;" /></td>
+              <td>${App.statusBadge(m.availability)}</td>
+              <td class="row" style="gap:4px;">
+                <button class="btn btn-sm btn-secondary save-price" data-id="${m.menu_item_id}" type="button">Update price</button>
+                <button class="btn btn-sm ${avail ? "btn-danger" : "btn-ok"} toggle-m" data-id="${m.menu_item_id}" type="button">${avail ? "Suspend sales" : "Make available"}</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+        document.querySelectorAll(".save-price").forEach((b) => {
+          b.onclick = () => {
+            const id = Number(b.dataset.id);
+            const val = Number(document.querySelector(`.price-inp[data-id="${id}"]`).value);
+            if (!val || val <= 0) return App.toast("Enter a price greater than zero.", "err");
+            const st2 = App.getState();
+            const m = st2.db.MENU_ITEM.find((x) => x.menu_item_id === id);
+            m.current_price = App.round2(val);
+            App.commit(st2);
+            App.toast(`Updated ${m.item_name} to ${App.formatMoney(val)}.`, "ok");
+          };
+        });
+        document.querySelectorAll(".toggle-m").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            const m = st2.db.MENU_ITEM.find((x) => x.menu_item_id === Number(b.dataset.id));
+            m.availability = m.availability === "Available" ? "Unavailable" : "Available";
+            App.commit(st2);
+            App.toast(`${m.item_name} ${m.availability === "Available" ? "Available" : "Unavailable"}`, "ok");
+            render();
+          };
+        });
+
+        document.getElementById("ops-dr-list").innerHTML = st.placeholders.dishRequests
+          .map(
+            (r, idx) => `
+          <div style="border:1px solid var(--border); background:#FFF; border-radius:8px; padding:10px; font-size:12.5px;">
+            <div class="between"><strong>${r.type} · ${App.escapeHtml(r.dish_name)}</strong><span class="badge ${r.status === "Pending" ? "badge-warn" : "badge-ok"}">${r.status}</span></div>
+            <div class="form-hint" style="margin:4px 0 8px;">${App.escapeHtml(r.ingredients)} · Submitted by: ${App.escapeHtml(r.by)}</div>
+            ${
+              r.status === "Pending"
+                ? `<div class="row"><button class="btn btn-sm btn-ok dr-act" data-i="${idx}" data-s="Approved" type="button">Approve</button><button class="btn btn-sm btn-danger dr-act" data-i="${idx}" data-s="Declined" type="button">Decline</button></div>`
+                : ""
+            }
+          </div>`
+          )
+          .join("");
+        document.querySelectorAll(".dr-act").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            const request = st2.placeholders.dishRequests[Number(b.dataset.i)];
+            if (request.status !== "Pending") return;
+            request.status = b.dataset.s;
+            if (request.menuId && request.status === "Approved") App.getMenuItem(request.menuId).availability = request.target;
+            App.commit(st2);
+            App.toast(`Menu request updated to ${b.dataset.s}`, "ok");
+            render();
+          };
+        });
+
+        const picker = document.getElementById("attendance-employee");
+        const selectedEmployee = picker.value;
+        picker.innerHTML = st.db.EMPLOYEE.map(e => `<option value="${e.employee_id}">${App.escapeHtml(e.employee_name)} · #${e.employee_id}</option>`).join("");
+        if (selectedEmployee) picker.value = selectedEmployee;
+        const showAttendance = () => {
+          const rows = App.attendance(Number(picker.value)).sort((a,b) => b.start-a.start);
+          document.getElementById("attendance-rows").innerHTML = rows.map(({entry,minutes}) => `<tr><td>${entry.shift_id || "Unscheduled"}</td><td>${entry.clock_in.slice(0,19)}</td><td>${entry.clock_out?.slice(0,19) || "On duty"}</td><td>${entry.break_minutes || 0} min</td><td>${entry.clock_out ? App.formatWorkHours(minutes) : "—"}</td></tr>`).join("") || '<tr><td colspan="5">No time entries yet.</td></tr>';
+        };
+        picker.onchange = showAttendance;
+        showAttendance();
+
+        // 2. Employees
+        document.getElementById("ops-emp-tbody").innerHTML = st.db.EMPLOYEE.map((e) => {
+          const sup = e.supervisor_id ? App.getEmployee(e.supervisor_id) : null;
+          const active = e.employment_status === "Active";
+          return `
+            <tr>
+              <td class="mono">#${e.employee_id}</td>
+              <td><strong>${e.employee_name}</strong><br/><span class="form-hint">${e.phone_placeholder}</span></td>
+              <td>${(e.qualified_roles || [e.role_id]).map((rid) => `<span class="badge badge-gold">${App.getRole(rid).role_name}</span>`).join(" ")}</td>
+              <td>${sup ? sup.employee_name : '<span class="form-hint">None</span>'}</td>
+              <td>${active ? '<span class="badge badge-ok">Active</span>' : '<span class="badge badge-neutral">Inactive</span>'}</td>
+              <td>${App.formatWorkHours(App.attendance(e.employee_id).reduce((sum,r) => sum+r.minutes,0))}</td>
+              <td>
+                ${
+                  e.employee_id === 101 || e.employee_id === App.workingEmployee()?.employee_id
+                    ? '<span class="form-hint">Protected account</span>'
+                    : `<button class="btn btn-sm ${active ? "btn-danger" : "btn-ok"} emp-soft-btn" data-id="${e.employee_id}" type="button">${active ? "Deactivate" : "Reactivate"}</button>`
+                }
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+        document.querySelectorAll(".emp-soft-btn").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            const e = st2.db.EMPLOYEE.find((x) => x.employee_id === Number(b.dataset.id));
+            if (!e || e.employee_id === 101 || e.employee_id === App.workingEmployee()?.employee_id) return App.toast("This account cannot be deactivated.", "err");
+            e.employment_status = e.employment_status === "Active" ? "Inactive" : "Active";
+            App.commit(st2);
+            App.toast(`${e.employee_name} ${e.employment_status === "Active" ? "Reactivated" : "Inactive"}.`, "ok");
+            render();
+          };
+        });
+
+        document.getElementById("ops-sr-list").innerHTML = st.placeholders.staffRequests
+          .map(
+            (r, idx) => `
+          <div style="border:1px solid var(--border); background:#FFF; border-radius:8px; padding:10px; font-size:12.5px;">
+            <div class="between"><strong>${App.escapeHtml(r.emp_name)} · ${r.type}</strong><span class="badge ${r.status === "Awaiting approval" ? "badge-warn" : "badge-ok"}">${r.status}</span></div>
+            <div class="form-hint" style="margin:4px 0 8px;">${App.escapeHtml(r.reason)} · ${r.date}</div>
+            ${
+              r.status === "Awaiting approval"
+                ? `<div class="row"><button class="btn btn-sm btn-ok sr-act" data-i="${idx}" data-s="Approved" type="button">Approve</button><button class="btn btn-sm btn-danger sr-act" data-i="${idx}" data-s="Declined" type="button">Decline</button></div>`
+                : ""
+            }
+          </div>`
+          )
+          .join("");
+        document.querySelectorAll(".sr-act").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            st2.placeholders.staffRequests[Number(b.dataset.i)].status = b.dataset.s;
+            App.commit(st2);
+            App.toast(`Staff request updated to ${b.dataset.s}`, "ok");
+            render();
+          };
+        });
+
+        // 3. Tables (maintenance first per hand-drawn p.15)
+        const sessCnt = {};
+        st.db.DINING_SESSION.forEach((s) => (sessCnt[s.table_id] = (sessCnt[s.table_id] || 0) + 1));
+        const tblSorted = [...st.db.RESTAURANT_TABLE].sort((a, b) => {
+          if (a.maintenance_status === "Needs maintenance" && b.maintenance_status !== "Needs maintenance") return -1;
+          if (b.maintenance_status === "Needs maintenance" && a.maintenance_status !== "Needs maintenance") return 1;
+          return (sessCnt[b.table_id] || 0) - (sessCnt[a.table_id] || 0);
+        });
+        document.getElementById("ops-tbl-tbody").innerHTML = tblSorted
+          .map(
+            (t) => `
+          <tr>
+            <td><strong>${t.table_number}</strong></td>
+            <td>${App.countLabel(t.capacity, "guest")}</td>
+            <td class="mono">${t.qr_code}</td>
+            <td>${App.statusBadge(t.table_status)}</td>
+            <td class="num"><strong>${sessCnt[t.table_id] || 0}</strong> visits</td>
+            <td>${t.maintenance_status === "Needs maintenance" ? '<span class="badge badge-danger">Needs maintenance</span>' : '<span class="badge badge-ok">Good</span>'}</td>
+            <td><button class="btn btn-sm btn-secondary tbl-maint" data-id="${t.table_id}" type="button">${t.maintenance_status === "Needs maintenance" ? "Mark as good" : "Flag for maintenance"}</button></td>
+          </tr>`
+          )
+          .join("");
+        document.querySelectorAll(".tbl-maint").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            const t = st2.db.RESTAURANT_TABLE.find((x) => x.table_id === Number(b.dataset.id));
+            t.maintenance_status = t.maintenance_status === "Needs maintenance" ? "Good" : "Needs maintenance";
+            App.commit(st2);
+            render();
+          };
+        });
+
+        // 4. Members Ranking
+        const memSorted = [...st.db.MEMBERSHIP].sort((a, b) => b.points_balance - a.points_balance);
+        const goldCnt = memSorted.filter(m => App.memberTier(m) === "Gold").length;
+        const standardCnt = memSorted.filter(m => App.memberTier(m) === "Standard").length;
+        document.getElementById("mem-summary-badges").innerHTML = `
+          <span class="badge badge-burgundy">Total members: ${memSorted.length}</span>
+          <span class="badge badge-gold">Gold: ${goldCnt}</span>
+          <span class="badge badge-ok">Standard: ${standardCnt}</span>
+        `;
+        document.getElementById("ops-mem-tbody").innerHTML = memSorted
+          .map((m, idx) => {
+            const c = App.getCustomer(m.customer_id);
+            const tier = App.memberTier(m);
+            const badge = tier === "Gold" ? "badge-gold" : tier === "Standard" ? "badge-ok" : "badge-neutral";
+            return `
+              <tr>
+                <td><strong>#${idx + 1}</strong></td>
+                <td class="mono">#${m.membership_id}</td>
+                <td><strong>${App.escapeHtml(c ? c.name : "-")}</strong></td>
+                <td class="mono">${c ? c.primary_phone : "-"}</td>
+                <td><span class="badge ${badge}">${App.escapeHtml(tier)}</span></td>
+                <td class="num"><strong>${m.points_balance}</strong> points</td>
+                <td class="mono">${m.joined_at.slice(0, 10)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      document.querySelectorAll("#ops-tabs button").forEach((btn) => {
+        btn.onclick = () => {
+          document.querySelectorAll("#ops-tabs button").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          ["menu", "emp", "tbl", "mem"].forEach((k) => {
+            document.getElementById("pane-" + k).style.display = btn.dataset.t === k ? "" : "none";
+          });
+        };
+      });
+
+      if (!App.initShell({
+        mode: "manager",
+        activePage: "manager-ops",
+
+        portalLabel: "Operations",
+
+        dbRole: "manager",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

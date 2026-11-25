@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartDine Restaurant · Menu & Reservations</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <!-- Hero Banner (P01 & Hand-drawn p.1: public accessible without login) -->
+    <section class="hero-banner">
+      <img class="hero-bg" src="assets/images/hero-restaurant.jpg" alt="Dining room at SmartDine" />
+      <div class="hero-overlay">
+        <p class="hero-kicker">American dining · Dine-in</p>
+        <h1><span data-restaurant-name>SmartDine</span> Restaurant</h1>
+        <p>Chargrilled steaks, griddle burgers and classic sides. Book a table or scan the table code once you’re seated.</p>
+        <div class="hero-cta-row">
+          <a class="btn btn-gold" href="reservations.html">Book a table</a>
+          <a class="btn hero-menu-link" href="#menu">Browse menu ↓</a>
+        </div>
+      </div>
+    </section>
+    <section class="service-strip" aria-label="Guest services">
+      <div><strong>Opening hours</strong><span>Daily, 10:30 AM–11:00 PM</span></div>
+      <a href="waitlist.html"><strong>Join the waitlist →</strong><span id="stat-waitlist"></span></a>
+      <a href="qr-order.html"><strong>Tableside ordering →</strong><span>Scan your table code to order once seated.</span></a>
+      <a href="auth.html"><strong>Sign in / Register →</strong><span>View past visits and rewards points.</span></a>
+    </section>
+    <section class="card" id="menu">
+      <div class="card-header">
+        <div><h2>Our menu</h2></div>
+        <label class="menu-search-label">Find a dish <input type="search" id="menu-search" placeholder="Search by dish name" /></label>
+      </div>
+      <div class="tabs" id="cat-tabs"></div>
+      <div class="menu-grid" id="menu-preview-grid"></div>
+    </section>
+  </main>
+
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let activeCat = "ALL";
+      let keyword = "";
+
+      function render() {
+        const st = App.getState();
+        const waiting = st.db.WAITLIST_ENTRY.filter(w => w.status === "Waiting").length;
+        document.getElementById("stat-waitlist").textContent = waiting ? App.countLabel(waiting, "party", "parties") + " waiting" : "No wait at the moment";
+
+        // Category tabs
+        const tabs = document.getElementById("cat-tabs");
+        const cats = [{ category_id: "ALL", category_name: "All items (" + st.db.MENU_ITEM.length + ")" }, ...st.db.MENU_CATEGORY];
+        tabs.innerHTML = cats
+          .map(
+            (c) =>
+              `<button class="tab-btn ${String(activeCat) === String(c.category_id) ? "active" : ""}" data-cat="${c.category_id}" type="button">${c.category_name}</button>`
+          )
+          .join("");
+        tabs.querySelectorAll("button").forEach((btn) => {
+          btn.onclick = () => {
+            activeCat = btn.dataset.cat;
+            render();
+          };
+        });
+        renderMenu();
+      }
+
+      function renderMenu() {
+        const st = App.getState();
+        const grid = document.getElementById("menu-preview-grid");
+        const kw = keyword.trim().toLowerCase();
+        const list = st.db.MENU_ITEM.filter((m) => {
+          if (activeCat !== "ALL" && String(m.category_id) !== String(activeCat)) return false;
+          if (kw && !m.item_name.toLowerCase().includes(kw)) return false;
+          return true;
+        });
+
+        if (!list.length) {
+          grid.innerHTML = `<div class="callout callout-warn">No dishes match “${App.escapeHtml(keyword)}”.</div>`;
+          return;
+        }
+
+        grid.innerHTML = list
+          .map((m) => {
+            const cat = App.getCategory(m.category_id);
+            const soldOut = m.availability !== "Available";
+            return `
+              <article class="dish-card ${soldOut ? "soldout" : ""}">
+                <div class="dish-img-wrap">
+                  <img src="${m.image}" alt="${m.item_name}" loading="lazy" />
+                </div>
+                <div class="dish-body">
+                  <div class="dish-cat">${cat ? cat.category_name : ""}</div>
+                  <div class="dish-name">${m.item_name}</div>
+                  <div class="dish-footer">
+                    <span class="dish-price">${App.formatMoney(m.current_price)}</span>
+                    ${soldOut ? '<span class="badge badge-danger">Unavailable</span>' : '<a class="btn btn-sm btn-ghost" href="qr-order.html?dish=' + m.menu_item_id + '">Order now</a>'}
+                  </div>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      document.getElementById("menu-search").addEventListener("input", (e) => {
+        keyword = e.target.value;
+        renderMenu();
+      });
+
+      App.initShell({
+        mode: "public",
+        activePage: "index",
+
+        dbRole: "guest",
+        onStateChange: render,
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

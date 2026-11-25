@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My work — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>My work</h1>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- Profile + Clock In/Out -->
+        <div class="grid-3">
+          <section class="card">
+            <div class="badge badge-burgundy" style="margin-bottom:8px;">Staff profile</div>
+            <h2 id="ep-name" style="font-family:var(--font-serif);">--</h2>
+            <div class="card-sub" id="ep-meta" style="margin-top:6px;">--</div>
+            <div class="row" id="ep-roles" style="margin-top:10px;"></div>
+          </section>
+
+          <section class="card">
+            <div class="badge badge-info" style="margin-bottom:8px;">Time clock</div>
+            <h3 id="ep-clock-status" style="margin-bottom:8px;">Clocked out</h3>
+            <div class="row" style="margin-bottom:8px;">
+              <button class="btn btn-ok" id="btn-clock-in" type="button">Clock in</button>
+              <button class="btn btn-danger" id="btn-clock-out" type="button">Clock out</button>
+            </div>
+            <div class="form-hint">You can also clock in for an unscheduled shift.</div>
+          </section>
+
+          <section class="card" style="background:linear-gradient(135deg, #FBF4E7, #FFFFFF);">
+            <div class="badge badge-gold" style="margin-bottom:8px;">Hours worked and tips</div>
+            <div style="font-family:var(--font-serif); font-size:28px; font-weight:700; color:var(--espresso);" id="ep-hours">--</div>
+            <div class="card-sub" id="ep-tips-sum">--</div>
+          </section>
+        </div>
+
+        <div class="grid-main-side">
+          <!-- Left: Shifts & Time Entries -->
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2>Schedule and attendance</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Shift ID</th><th>Shift role</th><th>Scheduled time</th><th>Time entries</th><th>Break</th><th>Status</th></tr>
+                </thead>
+                <tbody id="ep-shifts-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Right: Hand-drawn p.7 Leave / Resignation / Promotion Request Placeholder -->
+          <aside class="card">
+            <div class="card-header">
+              <div>
+                <h2>My requests</h2>
+              </div>
+            </div>
+
+            <form id="form-staff-req" style="margin-bottom:14px;">
+              <div class="form-group">
+                <label for="sr-type">Request type</label>
+                <select id="sr-type">
+                  <option value="Time off">Time off</option>
+                  <option value="Promotion">Promotion or additional role</option>
+                  <option value="Resignation">Resignation</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="sr-reason">Reason *</label>
+                <textarea id="sr-reason" rows="2" placeholder="Include the requested date and the reason…"></textarea>
+              </div>
+              <button class="btn btn-primary btn-sm" type="submit" style="width:100%;">Submit request</button>
+            </form>
+
+            <div id="sr-list" class="stack" style="gap:8px;"></div>
+          </aside>
+        </div>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      const activeEmpId = App.workingEmployee()?.employee_id;
+
+
+      function render() {
+        const st = App.getState();
+
+        const emp = App.getEmployee(activeEmpId);
+        if (!emp) return;
+        const sup = emp.supervisor_id ? App.getEmployee(emp.supervisor_id) : null;
+        document.getElementById("ep-name").textContent = `${emp.employee_name} (#${emp.employee_id})`;
+        document.getElementById("ep-meta").innerHTML =
+          `Hire date: ${emp.hire_date} · ${emp.employment_status === "Active" ? "Active" : "Inactive"}<br/>Supervisor: ${sup ? sup.employee_name : "None"}`;
+
+        document.getElementById("ep-roles").innerHTML = (emp.qualified_roles || [emp.role_id])
+          .map((rid) => `<span class="badge badge-gold">${App.getRole(rid).role_name}</span>`)
+          .join("");
+
+        // Shifts & Time Entries
+        const shifts = st.db.SHIFT.filter((s) => s.employee_id === emp.employee_id).sort((a, b) => b.shift_id - a.shift_id);
+        const punches = App.attendance(emp.employee_id);
+        const totalMins = punches.reduce((sum, row) => sum + row.minutes, 0);
+        const openPunch = punches.find(row => !row.entry.clock_out)?.entry;
+        document.getElementById("ep-shifts-tbody").innerHTML = shifts.length
+          ? shifts
+              .map((s) => {
+                const te = punches.find(row => row.entry.shift_id === s.shift_id)?.entry;
+                return `
+                  <tr>
+                    <td class="mono">#${s.shift_id}</td>
+                    <td>${App.getRole(s.role_id).role_name}</td>
+                    <td class="mono">${s.scheduled_start}<br/>~ ${s.scheduled_end.slice(11)}</td>
+                    <td class="mono">${te ? `${te.clock_in.slice(0,19)}<br/>~ ${te.clock_out ? te.clock_out.slice(11,19) : "On duty…"}` : '<span class="form-hint">No time entry</span>'}</td>
+                    <td>${te ? te.break_minutes + " min" : "-"}</td>
+                    <td>${App.statusBadge(s.shift_status)}</td>
+                  </tr>
+                `;
+              })
+              .join("")
+          : `<tr><td colspan="6" class="form-hint">No scheduled shifts.</td></tr>`;
+
+        const extra = punches.filter(row => row.entry.shift_id == null).map(row => row.entry);
+        if (extra.length) {
+          const rows = extra.map(t => `<tr><td>Unscheduled</td><td>${App.getRole(t.role_id || emp.role_id).role_name}</td><td>Unscheduled</td><td>${t.clock_in.slice(0,19)}<br>~ ${t.clock_out?.slice(0,19) || "On duty"}</td><td>${t.break_minutes} min</td><td>${t.clock_out ? "Clocked out" : "On duty"}</td></tr>`).join("");
+          const body = document.getElementById("ep-shifts-tbody");
+          if (!shifts.length) body.innerHTML = "";
+          body.insertAdjacentHTML("afterbegin", rows);
+        }
+        document.getElementById("btn-clock-in").disabled = Boolean(openPunch) || emp.employment_status !== "Active";
+        document.getElementById("btn-clock-out").disabled = !openPunch;
+        // Tip allocations earned
+        const tips = st.db.TIP_ALLOCATION.filter((ta) => ta.employee_id === emp.employee_id);
+        const tipSum = tips.reduce((acc, t) => acc + Number(t.amount), 0);
+        document.getElementById("ep-hours").textContent = App.formatWorkHours(totalMins);
+        document.getElementById("ep-tips-sum").textContent = `Total tips ${App.formatMoney(tipSum)} · ${App.countLabel(tips.length, "allocation")}`; 
+
+        document.getElementById("ep-clock-status").textContent = openPunch
+          ? `🟢 Clocked in at ${openPunch.clock_in.slice(0,19)} (${openPunch.shift_id ? "Shift #" + openPunch.shift_id : "Unscheduled"})`
+          : "⚪ Clocked out. You can start a scheduled or unscheduled shift.";
+
+        // Staff requests
+        const reqs = st.placeholders.staffRequests.filter((r) => r.emp_id === emp.employee_id);
+        document.getElementById("sr-list").innerHTML = reqs.length
+          ? reqs
+              .map(
+                (r) => `
+              <div style="border:1px solid var(--border); border-radius:8px; padding:10px; font-size:12.5px;">
+                <div class="between"><strong>${r.type}</strong><span class="badge ${r.status === "Awaiting approval" ? "badge-warn" : "badge-ok"}">${r.status}</span></div>
+                <div class="form-hint" style="margin-top:4px;">${App.escapeHtml(r.reason)} · ${r.date}</div>
+              </div>`
+              )
+              .join("")
+          : `<div class="form-hint">No previous requests.</div>`;
+      }
+
+
+      document.getElementById("btn-clock-in").onclick = () => {
+        const st = App.getState();
+        const emp = App.getEmployee(activeEmpId);
+        const myShifts = st.db.SHIFT.filter(s => s.employee_id === emp.employee_id);
+        if (emp.employment_status !== "Active" || st.db.TIME_ENTRY.some(t => !t.clock_out && (t.employee_id === activeEmpId || myShifts.some(s => s.shift_id === t.shift_id)))) return App.toast("You are already clocked in or cannot start a shift.", "err");
+        const at = App.nowStamp({milliseconds:true});
+        const sh = myShifts.find(s => s.shift_status === "Scheduled" && s.scheduled_start <= at && at < s.scheduled_end &&
+          !st.db.TIME_ENTRY.some(t => t.shift_id === s.shift_id));
+        const newTid = App.nextId(st.db.TIME_ENTRY, "time_entry_id", 7536);
+        st.db.TIME_ENTRY.push({
+          time_entry_id: newTid,
+          shift_id: sh?.shift_id ?? null,
+          employee_id: emp.employee_id,
+          role_id: sh?.role_id || emp.role_id,
+          clock_in: at,
+          clock_out: null,
+          break_minutes: 0,
+        });
+        App.commit(st);
+        App.toast("Clocked in.", "ok");
+        render();
+      };
+
+      document.getElementById("btn-clock-out").onclick = () => {
+        const st = App.getState();
+        const empShifts = new Set(st.db.SHIFT.filter((s) => s.employee_id === activeEmpId).map((s) => s.shift_id));
+        const openTe = st.db.TIME_ENTRY.find((t) => (empShifts.has(t.shift_id) || t.employee_id === activeEmpId) && !t.clock_out);
+        if (!openTe) return App.toast("There is no open time entry.", "err");
+        openTe.clock_out = App.nowStamp({milliseconds:true});
+        openTe.break_minutes = Number(openTe.break_minutes) || 0;
+        const sh = st.db.SHIFT.find((s) => s.shift_id === openTe.shift_id);
+        if (sh) sh.shift_status = "Completed";
+        App.commit(st);
+        App.toast("Clocked out.", "ok");
+        render();
+      };
+
+      document.getElementById("form-staff-req").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const reason = document.getElementById("sr-reason").value.trim();
+        if (!reason) return App.toast("Enter a reason for your request.", "err");
+        const st = App.getState();
+        const emp = App.getEmployee(activeEmpId);
+        st.placeholders.staffRequests.unshift({
+          id: "SR-0" + (st.placeholders.staffRequests.length + 1),
+          emp_id: emp.employee_id,
+          emp_name: emp.employee_name,
+          role: App.getRole(emp.role_id).role_name,
+          type: document.getElementById("sr-type").value,
+          date: App.nowStamp().slice(0, 10),
+          reason,
+          status: "Awaiting approval",
+        });
+        App.commit(st);
+        document.getElementById("sr-reason").value = "";
+        App.toast("Request submitted for manager approval.", "ok");
+        render();
+      });
+
+      if (!App.initShell({
+        mode: "staff",
+        activePage: "staff-profile",
+
+        portalLabel: "Staff profile",
+
+        dbRole: "server",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

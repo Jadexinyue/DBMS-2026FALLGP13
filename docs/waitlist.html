@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Waitlist — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <section class="between">
+      <div>
+        <h1 style="font-family:var(--font-serif); font-size:26px;">Waitlist</h1>
+        <p class="card-sub">The host can seat you as soon as a suitable table is available. Join the waitlist to track your place or leave the queue at any time.</p>
+      </div>
+    </section>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Parties waiting</div>
+        <div class="kpi-value" id="wl-waiting-cnt">--</div>
+        <div class="kpi-note">Called in order of arrival</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Available tables</div>
+        <div class="kpi-value" id="wl-avail-cnt">--</div>
+        <div class="kpi-note">The host matches tables to party size.</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Estimated wait</div>
+        <div class="kpi-value" id="wl-est-min">--</div>
+        <div class="kpi-note">Based on the queue and table turnover</div>
+      </div>
+    </div>
+
+    <div class="grid-main-side">
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>My waitlist</h2>
+            <div class="card-sub">Check your status or leave the queue before you are seated.</div>
+          </div>
+          <select id="wl-filter" style="width:140px;">
+            <option value="Waiting" selected>Waiting only</option>
+            <option value="ALL">All records</option>
+            <option value="Seated">Seated</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Waitlist ID</th>
+                <th>Guest name</th>
+                <th>Party size</th>
+                <th>Joined</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="wl-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Join the waitlist</h2>
+            <div class="card-sub">No account needed. You can leave the queue at any time.</div>
+          </div>
+        </div>
+        <div id="wl-alert" style="margin-bottom:12px;"></div>
+        <form id="form-wl">
+          <div class="form-group">
+            <label for="wl-name">Guest name *</label>
+            <input type="text" id="wl-name" placeholder="e.g. David Lin" />
+          </div>
+          <div class="form-group">
+            <label for="wl-party">Party size (1–8) *</label>
+            <input type="number" id="wl-party" min="1" max="8" value="4" />
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%;">Join waitlist</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      const tbody = document.getElementById("wl-tbody");
+      const filterEl = document.getElementById("wl-filter");
+      const alertEl = document.getElementById("wl-alert");
+
+      function render() {
+        const st = App.getState();
+        const waiting = st.db.WAITLIST_ENTRY.filter((w) => w.status === "Waiting");
+        const avail = st.db.RESTAURANT_TABLE.filter((t) => t.table_status === "AVAILABLE").length;
+        document.getElementById("wl-waiting-cnt").textContent = waiting.length;
+        document.getElementById("wl-avail-cnt").textContent = avail;
+        document.getElementById("wl-est-min").textContent = waiting.length ? `${waiting.length * 6} min` : "No wait";
+
+        const f = filterEl.value;
+        const list = [...st.db.WAITLIST_ENTRY]
+          .filter(w => st.loggedInCustomer ? w.customer_id === st.loggedInCustomer.customer_id : w.guestTicket === true)
+          .sort((a, b) => b.waitlist_id - a.waitlist_id)
+          .filter((w) => (f === "ALL" ? true : w.status === f));
+
+        tbody.innerHTML = !list.length ? '<tr><td colspan="6">No matching waitlist entries.</td></tr>' : list
+          .map((w) => {
+            const sess = st.db.DINING_SESSION.find((s) => s.waitlist_id === w.waitlist_id);
+            let act = '<span class="form-hint">—</span>';
+            if (w.status === "Waiting") {
+              act = `<button class="btn btn-sm btn-danger wl-cancel" data-id="${w.waitlist_id}">Leave queue</button>`;
+            } else if (sess) {
+              const t = App.getTable(sess.table_id);
+              act = `<span class="badge badge-info">Session #${sess.session_id} (${t ? t.table_number : ""})</span>`;
+            }
+            return `
+              <tr>
+                <td class="mono"><strong>#${w.waitlist_id}</strong></td>
+                <td>${App.escapeHtml(w.contact_name)}</td>
+                <td>${App.countLabel(w.party_size, "guest")}</td>
+                <td class="mono">${w.joined_at}</td>
+                <td>${App.statusBadge(w.status)}</td>
+                <td>${act}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        tbody.querySelectorAll(".wl-cancel").forEach((btn) => {
+          btn.onclick = () => {
+            const st2 = App.getState();
+            const rec = st2.db.WAITLIST_ENTRY.find((w) => w.waitlist_id === Number(btn.dataset.id));
+            if (rec?.status === "Waiting") {
+              rec.status = "Cancelled";
+              App.commit(st2);
+              App.toast(`Waitlist #${rec.waitlist_id} cancelled.`, "ok");
+              render();
+            }
+          };
+        });
+      }
+
+      document.getElementById("form-wl").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("wl-name").value.trim();
+        const party = Number(document.getElementById("wl-party").value);
+        if (!name || party < 1 || party > 8) {
+          alertEl.innerHTML = `<div class="callout callout-danger">Enter a name and a party size between 1 and 8.</div>`;
+          return;
+        }
+        const st = App.getState();
+        const newId = App.nextId(st.db.WAITLIST_ENTRY, "waitlist_id", 2031);
+        st.db.WAITLIST_ENTRY.push({
+          waitlist_id: newId,
+          contact_name: name,
+          customer_id: st.loggedInCustomer?.customer_id ?? null,
+          guestTicket: !st.loggedInCustomer,
+          party_size: party,
+          joined_at: App.nowStamp(),
+          status: "Waiting",
+        });
+        App.commit(st);
+        alertEl.innerHTML = `<div class="callout callout-ok">You’re on the list! Your waitlist number is <strong>#${newId}</strong>. The host will seat you when a suitable table is ready.</div>`;
+        App.toast(`Added to waitlist: #${newId}`, "ok");
+        document.getElementById("wl-name").value = "";
+        filterEl.value = "Waiting";
+        render();
+      });
+
+      filterEl.addEventListener("change", render);
+
+      App.initShell({
+        mode: "public",
+        activePage: "waitlist",
+
+        dbRole: "guest",
+        onStateChange: render,
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

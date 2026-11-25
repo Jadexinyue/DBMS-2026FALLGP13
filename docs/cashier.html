@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkout — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Checkout</h1>
+          <p>Select an order and review the total before taking payment.</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="host.html">View tables</a>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- Order Selector Strip -->
+        <section class="card">
+          <div class="between">
+            <div>
+              <strong>Select order</strong>
+            </div>
+            <select id="order-select" style="width:310px;"></select>
+          </div>
+        </section>
+
+        <p class="callout callout-info" id="receipt-empty" hidden>There is no bill for this table yet. Check your table code and place your first order.</p>
+        <div class="grid-main-side">
+          <!-- Left: Itemized Receipt (Grouped by SUB_ORDER round) -->
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2 id="rcpt-title">Receipt details</h2>
+                <div class="card-sub" id="rcpt-sub"></div>
+              </div>
+              <div id="rcpt-status-badge"></div>
+            </div>
+
+            <div class="table-wrap" style="margin-bottom:16px;">
+              <table>
+                <thead>
+                  <tr><th>Round / source</th><th>Item</th><th>Status</th><th class="num">Unit price</th></tr>
+                </thead>
+                <tbody id="rcpt-items-tbody"></tbody>
+              </table>
+            </div>
+
+            <!-- Financial Math Breakdown (BR-15 explicit anti-double-counting) -->
+            <div style="background:var(--surface-muted); border:1px solid var(--border); border-radius:10px; padding:14px 16px;">
+              <div class="between" style="margin-bottom:6px;"><span>Subtotal</span><strong id="m-subtotal">$0.00</strong></div>
+              <div class="between" style="margin-bottom:6px;"><span>Rewards discount</span><strong style="color:var(--ok-text);" id="m-discount">-$0.00</strong></div>
+              <div class="between" style="margin-bottom:6px;"><span>Tax (8%)</span><strong id="m-tax">$0.00</strong></div>
+              <div class="between" style="padding:8px 0; border-top:1px dashed var(--border-strong); margin-top:6px;">
+                <span>Total with tax</span>
+                <strong style="font-size:18px; color:var(--espresso);" id="m-order-total">$0.00</strong>
+              </div>
+              <div class="between" style="margin-bottom:6px;">
+                <span>Optional tip</span>
+                <strong style="color:var(--gold);" id="m-tip">$0.00</strong>
+              </div>
+              <div class="between" style="padding-top:10px; border-top:2px solid var(--burgundy); margin-top:6px;">
+                <span style="font-size:15.5px; font-weight:700;">Grand total</span>
+                <strong style="font-size:22px; color:var(--burgundy);" id="m-grand">$0.00</strong>
+              </div>
+            </div>
+          </section>
+
+          <!-- Right: Payment Execution & Bonus #2 Trigger Panel -->
+          <aside class="stack">
+            <section class="card" id="pay-action-card">
+              <div class="card-header">
+                <div>
+                  <h2>Payment</h2>
+                  <div class="card-sub">Choose a payment method and review the total.</div>
+                </div>
+              </div>
+
+              <div id="pay-feedback" style="margin-bottom:12px;"></div>
+
+              <div id="pay-form-wrap">
+                <div class="form-group">
+                  <label>Payment method</label>
+                  <div class="grid-2" style="gap:8px;" id="method-grid">
+                    <button type="button" class="btn btn-secondary pay-m-btn" data-m="Credit Card">💳 Credit Card</button>
+                    <button type="button" class="btn btn-primary pay-m-btn" data-m="Debit Card">🏦 Debit Card</button>
+                    <button type="button" class="btn btn-secondary pay-m-btn" data-m="Apple Pay">📱 Apple Pay</button>
+                    <button type="button" class="btn btn-secondary pay-m-btn" data-m="Cash">💵 Cash</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Optional tip</label>
+                  <div class="row" style="margin-bottom:8px;">
+                    <button type="button" class="btn btn-sm btn-secondary tip-pct" data-p="0">0% ($0)</button>
+                    <button type="button" class="btn btn-sm btn-secondary tip-pct" data-p="0.15">15%</button>
+                    <button type="button" class="btn btn-sm btn-secondary tip-pct" data-p="0.18">18%</button>
+                    <button type="button" class="btn btn-sm btn-secondary tip-pct" data-p="0.20">20%</button>
+                  </div>
+                  <input type="number" id="custom-tip" step="0.01" min="0" value="13.49" />
+                </div>
+
+                <div class="form-group">
+                  <label for="member-select">Rewards account (optional)</label>
+                  <select id="member-select"></select>
+                  <div id="guest-member-wrap" hidden>
+                    <label for="guest-member">Member ID (optional, earn points only)</label>
+                    <input id="guest-member" type="text" inputmode="numeric" autocomplete="off" placeholder="Enter member ID">
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label style="font-weight:500; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="chk-redeem" style="width:auto;" />
+                    Redeem 100 points for $10.00 off
+                  </label>
+                </div>
+
+                <button class="btn btn-ok" id="btn-confirm-pay" type="button" style="width:100%; padding:12px; font-size:15px;">
+                  Confirm payment
+                </button>
+              </div>
+            </section>
+
+          </aside>
+        </div>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get("mode");
+      const selfService = mode === "self";
+      const historyView = mode === "history";
+      const customerView = selfService || historyView;
+      const readOnly = historyView || mode === "receipt";
+      const requestedOrder = Number(params.get("order"));
+      let currentOrderId = requestedOrder || null;
+      let selectedMethod = "Debit Card";
+
+      const orderSel = document.getElementById("order-select");
+      const memberSel = document.getElementById("member-select");
+      const tipInput = document.getElementById("custom-tip");
+      const redeemChk = document.getElementById("chk-redeem");
+
+      if (selfService || readOnly) {
+        document.querySelector(".topbar h1").textContent = historyView ? "Dining receipt" : selfService ? "Table checkout" : "Table bill";
+        document.querySelector(".topbar-title p").textContent = selfService ? "Review your items and total. You can add a tip if you wish." : "Review the items and payment details for this visit.";
+        document.querySelector("#order-select").previousElementSibling.innerHTML = "<strong>This visit</strong>";
+      }
+      if (customerView) {
+        document.getElementById("sd-sidebar").remove();
+        document.querySelector(".app-shell").insertAdjacentHTML("beforebegin", '<div id="sd-header"></div>');
+        document.querySelector(".topbar-actions a").href = "customer-center.html";
+        document.querySelector(".topbar-actions a").textContent = "Back to my dining";
+      }
+      function populateSelectors() {
+        const st = App.getState();
+        let merged;
+        if (historyView) {
+          merged = App.customerReceipts().filter(o => o.order_id === requestedOrder);
+        } else if (selfService) {
+          const session = App.qrSession();
+          const order = session && App.getOrderForSession(session.session_id);
+          merged = order && (!requestedOrder || requestedOrder === order.order_id) ? [order] : [];
+        } else if (readOnly) {
+          merged = st.db.ORDER.filter(o => o.order_id === requestedOrder);
+        } else {
+          merged = [...st.db.ORDER].sort((a,b) =>
+            Number(b.order_status === "Open") - Number(a.order_status === "Open") || b.order_id - a.order_id);
+        }
+        if (!merged.some(o => o.order_id === currentOrderId)) {
+          currentOrderId = requestedOrder && !selfService ? null : merged[0]?.order_id;
+        }
+        orderSel.disabled = selfService || readOnly;
+        orderSel.innerHTML = merged
+          .map((o) => {
+            const s = st.db.DINING_SESSION.find((ds) => ds.session_id === o.session_id);
+            const t = s ? App.getTable(s.table_id) : null;
+            return `<option value="${o.order_id}" ${o.order_id === currentOrderId ? "selected" : ""}>Order #${o.order_id} · ${t ? t.table_number : "?"} · ${App.statusLabel(o.order_status)}</option>`;
+          })
+          .join("");
+
+        const dining = st.db.DINING_SESSION.find(s => s.session_id === App.calcOrderSummary(currentOrderId).order?.session_id);
+        const booking = dining && st.db.RESERVATION.find(r => r.reservation_id === dining.reservation_id);
+        const anonymous = selfService && !st.loggedInCustomer;
+        memberSel.hidden = anonymous;
+        memberSel.previousElementSibling.hidden = anonymous;
+        document.getElementById("guest-member-wrap").hidden = !anonymous;
+        redeemChk.closest(".form-group").hidden = anonymous;
+        if (anonymous) redeemChk.checked = false;
+        const previousMember = memberSel.dataset.order === String(currentOrderId) ? memberSel.value : null;
+        memberSel.dataset.order = String(currentOrderId);
+        memberSel.innerHTML =
+          `<option value="">No rewards account</option>` +
+          st.db.MEMBERSHIP.filter(m => !customerView || m.customer_id === st.loggedInCustomer?.customer_id)
+            .map((m) => {
+              const c = App.getCustomer(m.customer_id);
+              const isDefault = selfService || m.customer_id === booking?.customer_id;
+              return `<option value="${m.membership_id}" ${isDefault ? "selected" : ""}>Member #${m.membership_id} · ${App.escapeHtml(c ? c.name : "")} (${App.countLabel(m.points_balance, "point")})</option>`;
+            })
+            .join("");
+        if (previousMember !== null && [...memberSel.options].some(option => option.value === previousMember)) {
+          memberSel.value = previousMember;
+        }
+      }
+
+      function recomputePreview() {
+        const sum = App.calcOrderSummary(currentOrderId);
+        if (!sum.order) return;
+
+        const isPaid = sum.order.order_status === "Paid";
+        const previewDiscount = isPaid ? sum.discount : redeemChk.checked && memberSel.value ? 10.0 : sum.discount;
+        const taxable = Math.max(0, App.round2(sum.subtotal - previewDiscount));
+        const tax = App.round2(taxable * 0.08);
+        const orderTotal = App.round2(taxable + tax);
+        const tip = isPaid ? sum.tip : App.round2(Math.max(0, Number(tipInput.value || 0)));
+        const grand = App.round2(orderTotal + tip);
+        document.querySelectorAll(".tip-pct").forEach(button => {
+          const selected = tip === App.round2(sum.subtotal * Number(button.dataset.p));
+          button.classList.toggle("btn-gold", selected);
+          button.classList.toggle("btn-secondary", !selected);
+          button.setAttribute("aria-pressed", String(selected));
+        });
+
+        document.getElementById("m-subtotal").textContent = App.formatMoney(sum.subtotal);
+        document.getElementById("m-discount").textContent = "-" + App.formatMoney(previewDiscount);
+        document.getElementById("m-tax").textContent = App.formatMoney(tax);
+        document.getElementById("m-order-total").textContent = App.formatMoney(orderTotal);
+        document.getElementById("m-tip").textContent = App.formatMoney(tip);
+        document.getElementById("m-grand").textContent = App.formatMoney(grand);
+      }
+
+      function render() {
+        populateSelectors();
+        const st = App.getState();
+        const sum = App.calcOrderSummary(currentOrderId);
+        const receipt = document.querySelector(".grid-main-side");
+        receipt.hidden = !sum.order;
+        const empty = document.getElementById("receipt-empty");
+        empty.hidden = Boolean(sum.order);
+        if (!sum.order) return;
+
+        const sess = st.db.DINING_SESSION.find((s) => s.session_id === sum.order.session_id);
+        const tbl = sess ? App.getTable(sess.table_id) : null;
+        const subs = App.getSubOrdersForOrder(currentOrderId);
+
+        document.getElementById("rcpt-title").textContent = `Order #${currentOrderId} receipt (${tbl ? tbl.table_number : ""})`;
+        document.getElementById("rcpt-sub").textContent = `Session #${sess ? sess.session_id : "?"} · ${App.countLabel(subs.length, "round")} / ${App.countLabel(sum.activeItems.length, "active item")}`;
+        document.getElementById("rcpt-status-badge").innerHTML = App.statusBadge(sum.order.order_status);
+
+        document.getElementById("rcpt-items-tbody").innerHTML = subs
+          .map((s, idx) =>
+            sum.items
+              .filter((i) => i.sub_order_id === s.sub_order_id)
+              .map((i) => {
+                const mi = App.getMenuItem(i.menu_item_id);
+                return `
+                  <tr style="${i.item_status === "CANCELLED" ? "opacity:0.45; text-decoration:line-through;" : ""}">
+                    <td>Round ${idx + 1} · ${s.channel === "QR_Code" ? "Tableside QR" : "Server POS"}</td>
+                    <td><strong>${mi ? mi.item_name : "#" + i.menu_item_id}</strong></td>
+                    <td>${App.statusBadge(i.item_status)}</td>
+                    <td class="num">${App.formatMoney(i.unit_price)}</td>
+                  </tr>
+                `;
+              })
+              .join("")
+          )
+          .join("");
+
+        const isPaid = sum.order.order_status === "Paid";
+        const fb = document.getElementById("pay-feedback");
+        const formWrap = document.getElementById("pay-form-wrap");
+
+        const card = document.getElementById("pay-action-card");
+        const showDetailsOnly = (readOnly && !isPaid) || sum.order.order_status === "Cancelled";
+        card.closest("aside").hidden = showDetailsOnly;
+        receipt.classList.toggle("receipt-only", showDetailsOnly);
+        card.querySelector("h2").textContent = isPaid ? "Payment details" : "Payment";
+        card.querySelector(".card-sub").hidden = isPaid;
+        if (isPaid && sum.payment) {
+          const emp = sum.payment.employee_id ? App.getEmployee(sum.payment.employee_id) : null;
+          const pt = st.db.POINT_TRANSACTION.find((x) => x.order_id === currentOrderId);
+          fb.innerHTML = `
+            <div class="callout callout-ok">
+              <div>
+                <strong>Payment received · Receipt #${sum.payment.payment_id}</strong><br/>
+                Method: ${sum.payment.method} · Taken by: ${emp ? emp.employee_name + " (#" + emp.employee_id + ")" : "Self-checkout"}<br/>
+                Paid at: ${sum.payment.paid_at}<br/>
+                ${pt ? `Points transaction #${pt.point_txn_id} · Member #${pt.membership_id} · Net change <strong>${pt.net_change >= 0 ? "+" : ""}${pt.net_change}</strong>` : "No rewards account linked"}<br/>
+                <span class="form-hint">${tbl ? tbl.table_number : ""}</span>
+              </div>
+            </div>
+          `;
+          formWrap.style.display = "none";
+        } else {
+          fb.innerHTML = "";
+          formWrap.style.display = readOnly ? "none" : "";
+          if (tipInput.dataset.order !== String(currentOrderId)) {
+            tipInput.value = "0.00";
+            tipInput.dataset.order = currentOrderId;
+            redeemChk.checked = false;
+          }
+        }
+
+
+        recomputePreview();
+      }
+
+      // Wire payment method buttons
+      document.querySelectorAll(".pay-m-btn").forEach((b) => {
+        b.onclick = () => {
+          selectedMethod = b.dataset.m;
+          document.querySelectorAll(".pay-m-btn").forEach((x) => {
+            x.classList.remove("btn-primary");
+            x.classList.add("btn-secondary");
+          });
+          b.classList.remove("btn-secondary");
+          b.classList.add("btn-primary");
+        };
+      });
+
+      // Tip preset buttons
+      document.querySelectorAll(".tip-pct").forEach((b) => {
+        b.onclick = () => {
+          const sum = App.calcOrderSummary(currentOrderId);
+          const pct = Number(b.dataset.p);
+          tipInput.value = App.round2(sum.subtotal * pct).toFixed(2);
+          recomputePreview();
+        };
+      });
+
+      orderSel.addEventListener("change", () => {
+        currentOrderId = Number(orderSel.value);
+        render();
+      });
+      tipInput.addEventListener("input", recomputePreview);
+      memberSel.addEventListener("change", recomputePreview);
+      redeemChk.addEventListener("change", recomputePreview);
+
+      function pay() {
+        if (readOnly || !currentOrderId || (!selfService && !App.workingEmployee())) return;
+        if (selfService && App.getOrderForSession(App.qrSession()?.session_id)?.order_id !== currentOrderId) {
+          render();
+          return App.toast("This table code or dining session has changed. Please check the table again.", "err");
+        }
+        const anonymous = selfService && !App.getState().loggedInCustomer;
+        const memberNumber = anonymous ? document.getElementById("guest-member").value.trim() : memberSel.value;
+        if (memberNumber && (!/^\d+$/.test(memberNumber) || !App.getState().db.MEMBERSHIP.some(m => m.membership_id === Number(memberNumber)))) {
+          return App.toast("Member ID not found. Check the number and try again.", "err");
+        }
+        const res = App.settlePayment({
+          orderId: currentOrderId,
+          method: selectedMethod,
+          tipAmount: Number(tipInput.value || 0),
+          employeeId: selfService ? null : App.workingEmployee().employee_id,
+          membershipId: memberNumber ? Number(memberNumber) : null,
+          redeem100: redeemChk.checked,
+        });
+        if (!res.ok) return App.toast(res.error, "err");
+        App.toast(`Order #${currentOrderId} paid. Total: ${App.formatMoney(res.grandTotal)}.`, "ok");
+        render();
+      };
+
+      document.getElementById("btn-confirm-pay").onclick = async () => {
+        await App.businessAction(pay);
+      };
+
+      if (!App.initShell({
+        mode: customerView ? "public" : "staff",
+        activePage: "cashier",
+
+        portalLabel: "Checkout",
+
+        dbRole: selfService ? "guest" : readOnly ? "host" : "cashier",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

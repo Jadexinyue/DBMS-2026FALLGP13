@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Host station — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Host station</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-primary" id="btn-walkin-modal" type="button">Seat a walk-in</button>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- KPI Strip -->
+        <section class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Available tables</div>
+            <div class="kpi-value" id="k-avail">--</div>
+            <div class="kpi-note">20 tables in total</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Seated or dining</div>
+            <div class="kpi-value" id="k-occ">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Paid or awaiting cleaning</div>
+            <div class="kpi-value" id="k-dirty">--</div>
+            <div class="kpi-note">Clean the table before seating the next party.</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Reservations / waitlist</div>
+            <div class="kpi-value" id="k-queue">--</div>
+            <div class="kpi-note">Seat guests with reservations first.</div>
+          </div>
+        </section>
+
+        <!-- Main Floorplan + Selected Table Inspector -->
+        <div class="grid-main-side">
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2>Dining room floor plan (T01–T20)</h2>
+                <div class="card-sub">Select a table to view its order, check out departing guests or mark it clean.</div>
+              </div>
+              <div class="row" style="gap:6px;">
+                <span class="badge badge-ok">Available</span>
+                <span class="badge badge-burgundy">Occupied</span>
+                <span class="badge badge-info">Paid, still seated</span>
+                <span class="badge badge-warn">Needs cleaning</span>
+                <span class="badge badge-gold">Reserved</span>
+              </div>
+            </div>
+            <div class="floor-grid" id="host-floor-grid"></div>
+          </section>
+
+          <!-- Selected Table Detail & Actions -->
+          <section class="card" id="host-inspector">
+            <div class="card-header">
+              <div>
+                <h2 id="insp-title">Select a table</h2>
+                <div class="card-sub" id="insp-sub">View its table code and manage the current visit.</div>
+              </div>
+            </div>
+            <div id="insp-body" class="stack"></div>
+          </section>
+        </div>
+
+        <!-- Tabs: Reservations / Waitlist / Read-Only Payment Details (Hand-drawn p.6) -->
+        <section class="card">
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="res" type="button">Arriving reservations</button>
+            <button class="tab-btn" data-tab="wl" type="button">Waitlist</button>
+            <button class="tab-btn" data-tab="pay" type="button">Payments</button>
+          </div>
+
+          <div id="tab-res">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Reservation</th><th>Contact</th><th>Reserved for</th><th>Party size</th><th>Status</th><th>Seating</th></tr>
+                </thead>
+                <tbody id="host-res-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="tab-wl" style="display:none;">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Waitlist ID</th><th>Guest name</th><th>Party size</th><th>Joined</th><th>Status</th><th>Seating</th></tr>
+                </thead>
+                <tbody id="host-wl-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="tab-pay" style="display:none;">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Payment ID</th><th>Order</th><th>Table</th><th>Method</th><th class="num">Order total</th><th class="num">Tip</th><th class="num">Total with tip</th><th>Paid at</th></tr>
+                </thead>
+                <tbody id="host-pay-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Seat Guest (Reservation / Waitlist / Walk-in) -->
+  <div class="modal-backdrop" id="seat-modal">
+    <div class="modal-box" style="max-width:460px;">
+      <div class="card-header">
+        <div>
+          <h2 id="seat-modal-title">Seat guests</h2>
+          <div class="card-sub" id="seat-modal-sub">Choose an available table that fits the party.</div>
+        </div>
+        <button class="btn btn-sm btn-secondary" id="seat-close" type="button">Close</button>
+      </div>
+      <form id="form-seat">
+        <input type="hidden" id="seat-res-id" />
+        <input type="hidden" id="seat-wl-id" />
+        <div class="form-group">
+          <label for="seat-guests">Guests to seat *</label>
+          <input type="number" id="seat-guests" min="1" max="8" value="2" />
+        </div>
+        <div class="form-group">
+          <label for="seat-table">Table *</label>
+          <select id="seat-table"></select>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%;">Confirm seating</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let selectedTableId = 9; // Default focus T09 (9003)
+      const seatModal = document.getElementById("seat-modal");
+
+      function openSeatModal({ title, guests, resId, wlId, tableId }) {
+        const st = App.getState();
+        document.getElementById("seat-modal-title").textContent = title;
+        document.getElementById("seat-guests").value = guests || 2;
+        document.getElementById("seat-res-id").value = resId || "";
+        document.getElementById("seat-wl-id").value = wlId || "";
+
+        const input = document.getElementById("seat-guests");
+        const select = document.getElementById("seat-table");
+        function updateChoices(preferred) {
+          const count = Number(input.value);
+          const choices = App.getState().db.RESTAURANT_TABLE.filter(t => Number.isInteger(count) && count >= 1 && count <= 8 &&
+            ["AVAILABLE", "RESERVED"].includes(t.table_status) && t.capacity >= count && !App.getActiveSessionForTable(t.table_id));
+          select.innerHTML = choices.length ? choices.map(t => `<option value="${t.table_id}">${t.table_number} (${App.countLabel(t.capacity, "seat")})</option>`).join("")
+            : '<option value="">No available table fits this party</option>';
+          if (choices.some(t => t.table_id === Number(preferred))) select.value = preferred;
+          seatModal.querySelector('[type="submit"]').disabled = !choices.length;
+        }
+        input.oninput = () => updateChoices(select.value);
+        updateChoices(tableId);
+        document.getElementById("seat-guests").readOnly = Boolean(resId || wlId);
+        seatModal.classList.add("open");
+      }
+
+      function render() {
+        const st = App.getState();
+        const tables = st.db.RESTAURANT_TABLE;
+        document.getElementById("k-avail").textContent = tables.filter((t) => t.table_status === "AVAILABLE").length;
+        document.getElementById("k-occ").textContent = tables.filter((t) => ["SEATED", "ORDERED", "OCCUPIED"].includes(t.table_status)).length;
+        document.getElementById("k-dirty").textContent = tables.filter((t) => ["PAID", "DIRTY"].includes(t.table_status)).length;
+        const confRes = st.db.RESERVATION.filter((r) => r.status === "Confirmed").length;
+        const waitCnt = st.db.WAITLIST_ENTRY.filter((w) => w.status === "Waiting").length;
+        document.getElementById("k-queue").textContent = `${confRes} / ${waitCnt}`;
+
+        // Floorplan tiles
+        const grid = document.getElementById("host-floor-grid");
+        grid.innerHTML = tables
+          .map((t) => {
+            const sess = App.getActiveSessionForTable(t.table_id);
+            const ord = sess ? App.getOrderForSession(sess.session_id) : null;
+            return `
+              <button type="button" class="table-tile st-${t.table_status} ${selectedTableId === t.table_id ? "selected" : ""}" data-tid="${t.table_id}">
+                <div class="table-tile-num">
+                  <span>${t.table_number}</span>
+                  <span class="table-tile-cap">${App.countLabel(t.capacity, "seat")}</span>
+                </div>
+                <div class="table-tile-sub">${App.statusLabel(t.table_status)}</div>
+                <div class="form-hint">${ord ? "Order #" + ord.order_id : sess ? "Session #" + sess.session_id : t.qr_code.replace("QR-SMARTDINE-", "")}</div>
+              </button>
+            `;
+          })
+          .join("");
+
+        grid.querySelectorAll("button").forEach((b) => {
+          b.onclick = () => {
+            selectedTableId = Number(b.dataset.tid);
+            render();
+          };
+        });
+
+        renderInspector();
+        renderTables();
+      }
+
+      function renderInspector() {
+        const t = App.getTable(selectedTableId) || App.getTable(9);
+        const sess = App.getActiveSessionForTable(t.table_id);
+        const ord = sess ? App.getOrderForSession(sess.session_id) : null;
+        document.getElementById("insp-title").textContent = `Table ${t.table_number} (capacity: ${App.countLabel(t.capacity, "seat")})`;
+        document.getElementById("insp-sub").textContent = `Table code: ${t.qr_code} · Condition: ${t.maintenance_status}`;
+
+        const body = document.getElementById("insp-body");
+        let html = `
+          <div class="between"><span>Table status</span>${App.statusBadge(t.table_status)}</div>
+        `;
+        if (sess) {
+          const sum = ord ? App.calcOrderSummary(ord.order_id) : null;
+          html += `
+            <div class="callout callout-info">
+              <div>
+                <strong>Active dining session #${sess.session_id}</strong><br/>
+                Seated at: ${sess.seated_at} · Party size: ${App.countLabel(sess.guest_count, "guest")}<br/>
+                Source: ${sess.reservation_id ? "Reservation #" + sess.reservation_id : sess.waitlist_id ? "Waitlist #" + sess.waitlist_id : "Walk-in"}<br/>
+                ${ord ? `Order: <strong>#${ord.order_id}</strong> (${App.statusLabel(ord.order_status)} · With tax: ${App.formatMoney(sum.totalBeforeTip)})` : "No order yet"}
+              </div>
+            </div>
+            <div class="row">
+              <a class="btn btn-sm btn-secondary" href="qr-order.html?table=${t.table_id}&session=${sess.session_id}">Open tableside menu</a>
+              ${ord ? `<a class="btn btn-sm btn-gold" href="cashier.html?mode=receipt&order=${ord.order_id}">View table bill</a>` : ""}
+            </div>
+          `;
+          if (App.canCloseOrder(ord)) {
+            html += `<button class="btn btn-primary" id="btn-guest-left" type="button">Confirm departure</button>`;
+          } else {
+            html += `<p class="form-hint">Order #${ord.order_id} is awaiting payment.</p>`;
+          }
+        } else if (t.table_status === "DIRTY") {
+          html += `
+            <div class="callout callout-warn">The guests have left. Clean this table before seating the next party.</div>
+            <button class="btn btn-ok" id="btn-clean-done" type="button">Mark table clean</button>
+          `;
+        } else if (t.table_status === "AVAILABLE" || t.table_status === "RESERVED") {
+          html += `
+            <div class="callout callout-ok">This table is clean and ready for seating.</div>
+            <button class="btn btn-primary" id="btn-seat-this" type="button">+ Seat guests at ${t.table_number}</button>
+          `;
+        } else {
+          html += `<span class="form-hint">This table is currently unavailable.</span>`;
+        }
+
+        body.innerHTML = html;
+
+        const leftBtn = document.getElementById("btn-guest-left");
+        if (leftBtn) {
+          leftBtn.onclick = () => {
+            const res = App.markGuestLeft(t.table_id);
+            if (!res.ok) App.toast(res.error, "err");
+            else {
+              App.toast(`Guests have left ${t.table_number}. The table is awaiting cleaning.`, "ok");
+              render();
+            }
+          };
+        }
+        const cleanBtn = document.getElementById("btn-clean-done");
+        if (cleanBtn) {
+          cleanBtn.onclick = () => {
+            const result = App.markTableCleaned(t.table_id);
+            if (!result.ok) return App.toast(result.error, "err");
+            App.toast(`${t.table_number} is clean and ready for seating.`, "ok");
+            render();
+          };
+        }
+        const seatThis = document.getElementById("btn-seat-this");
+        if (seatThis) {
+          seatThis.onclick = () => openSeatModal({ title: `Seat walk-in at ${t.table_number}`, guests: Math.min(2, t.capacity), tableId: t.table_id });
+        }
+      }
+
+      function renderTables() {
+        const st = App.getState();
+
+        // Reservations (Confirmed first + #4003 highlight)
+        const resList = [...st.db.RESERVATION]
+          .filter((r) => r.status === "Confirmed")
+          .sort((a,b) => Number(b.status === "Confirmed") - Number(a.status === "Confirmed") || a.reserved_for.localeCompare(b.reserved_for));
+        document.getElementById("host-res-tbody").innerHTML = resList
+          .map((r) => `
+            <tr>
+              <td class="mono"><strong>#${r.reservation_id}</strong></td>
+              <td>${App.escapeHtml(r.contact_name)}${r.contact_phone ? `<br><small>${App.escapeHtml(r.contact_phone)}</small>` : ""}</td>
+              <td class="mono">${r.reserved_for}</td>
+              <td>${App.countLabel(r.party_size, "guest")}</td>
+              <td>${App.statusBadge(r.status)}</td>
+              <td>
+                ${
+                  r.status === "Confirmed"
+                    ? `<button class="btn btn-sm btn-primary seat-res-btn" data-id="${r.reservation_id}" data-party="${r.party_size}" data-name="${App.escapeHtml(r.contact_name)}">Seat party</button> <button class="btn btn-sm btn-ghost res-status-action" data-id="${r.reservation_id}" data-state="Cancelled">Cancel</button> <button class="btn btn-sm btn-ghost res-status-action" data-id="${r.reservation_id}" data-state="No-show">No-show</button>`
+                    : App.statusBadge(r.status)
+                }
+              </td>
+            </tr>
+          `)
+          .join("");
+
+        document.querySelectorAll(".seat-res-btn").forEach((b) => {
+          b.onclick = () =>
+            openSeatModal({
+              title: `Seat reservation #${b.dataset.id} (${b.dataset.name})`,
+              guests: Number(b.dataset.party),
+              resId: Number(b.dataset.id),
+            });
+        });
+
+        document.querySelectorAll(".res-status-action").forEach(b => {
+          b.onclick = () => {
+            const record = App.getState().db.RESERVATION.find(r => r.reservation_id === Number(b.dataset.id));
+            if (record?.status !== "Confirmed") return;
+            if (b.dataset.state === "No-show" && record.reserved_for > App.nowStamp()) return App.toast("This reservation has not started yet.", "err");
+            if (!confirm("Mark reservation #" + record.reservation_id  + " as " + App.statusLabel(b.dataset.state) + "?")) return;
+            record.status = b.dataset.state;
+            App.commit(App.getState());
+            render();
+          };
+        });
+        // Waitlist
+        const wlList = st.db.WAITLIST_ENTRY.filter((w) => w.status === "Waiting");
+        document.getElementById("host-wl-tbody").innerHTML = wlList.length
+          ? wlList
+              .map(
+                (w) => `
+              <tr>
+                <td class="mono"><strong>#${w.waitlist_id}</strong></td>
+                <td>${App.escapeHtml(w.contact_name)}</td>
+                <td>${App.countLabel(w.party_size, "guest")}</td>
+                <td class="mono">${w.joined_at}</td>
+                <td>${App.statusBadge(w.status)}</td>
+                <td><button class="btn btn-sm btn-primary seat-wl-btn" data-id="${w.waitlist_id}" data-party="${w.party_size}" data-name="${App.escapeHtml(w.contact_name)}">Call and seat</button></td>
+              </tr>`
+              )
+              .join("")
+          : `<tr><td colspan="6" class="form-hint">No parties are waiting.</td></tr>`;
+
+        document.querySelectorAll(".seat-wl-btn").forEach((b) => {
+          b.onclick = () =>
+            openSeatModal({
+              title: `Seat waitlisted party #${b.dataset.id} (${b.dataset.name})`,
+              guests: Number(b.dataset.party),
+              wlId: Number(b.dataset.id),
+            });
+        });
+
+        // Read-only Payment Details (latest 12 + 11003 if present)
+        const pays = [...st.db.PAYMENT].sort((a, b) => b.payment_id - a.payment_id).slice(0, 15);
+        document.getElementById("host-pay-tbody").innerHTML = pays
+          .map((p) => {
+            const ord = st.db.ORDER.find((o) => o.order_id === p.order_id);
+            const sess = ord ? st.db.DINING_SESSION.find((s) => s.session_id === ord.session_id) : null;
+            const tbl = sess ? App.getTable(sess.table_id) : null;
+            const grand = App.round2(Number(p.amount) + Number(p.tip_amount));
+            return `
+              <tr>
+                <td class="mono">#${p.payment_id}</td>
+                <td class="mono"><strong>#${p.order_id}</strong></td>
+                <td>${tbl ? tbl.table_number : "-"}</td>
+                <td>${p.method}</td>
+                <td class="num">${App.formatMoney(p.amount)}</td>
+                <td class="num">${App.formatMoney(p.tip_amount)}</td>
+                <td class="num"><strong>${App.formatMoney(grand)}</strong></td>
+                <td class="mono">${p.paid_at}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      // Tabs switching
+      document.querySelectorAll(".tabs .tab-btn").forEach((btn) => {
+        btn.onclick = () => {
+          document.querySelectorAll(".tabs .tab-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          ["res", "wl", "pay"].forEach((k) => {
+            document.getElementById("tab-" + k).style.display = btn.dataset.tab === k ? "" : "none";
+          });
+        };
+      });
+
+      document.getElementById("btn-walkin-modal").onclick = () =>
+        openSeatModal({ title: "Seat a walk-in", guests: 2 });
+      document.getElementById("seat-close").onclick = () => seatModal.classList.remove("open");
+
+      document.getElementById("form-seat").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const tid = Number(document.getElementById("seat-table").value);
+        const guests = Number(document.getElementById("seat-guests").value);
+        const resId = document.getElementById("seat-res-id").value || null;
+        const wlId = document.getElementById("seat-wl-id").value || null;
+        if (!tid) return App.toast("No suitable table is available. Clean a table or add the party to the waitlist.", "err");
+        const r = App.seatGuest({ tableId: tid, guestCount: guests, reservationId: resId, waitlistId: wlId });
+        if (!r.ok) return App.toast(r.error, "err");
+        selectedTableId = tid;
+        seatModal.classList.remove("open");
+        App.toast(`Seated at ${r.table.table_number} · Party of ${r.session.guest_count}.`, "ok");
+        render();
+      });
+
+      if (!App.initShell({
+        mode: "staff",
+        activePage: "host",
+
+        portalLabel: "Host station",
+
+        dbRole: "host",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

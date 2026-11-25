@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tip allocation — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Tip allocation</h1>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="manager-dashboard.html">← Manager overview</a>
+          <a class="btn btn-primary" href="index.html">Back to home</a>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- Tip Pool Selector & Audit -->
+        <div class="grid-main-side">
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2>Tip pools by service period</h2>
+                <div class="card-sub">Select a service period to view tip payments and staff allocations.</div>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Pool</th><th>Service period</th><th class="num">Pool total</th><th class="num">Allocated</th><th>Status</th></tr>
+                </thead>
+                <tbody id="pool-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2 id="pool-detail-title">Allocation details</h2>
+                <div class="card-sub" id="pool-detail-sub"></div>
+              </div>
+            </div>
+
+
+            <h3 style="font-size:14px; margin-bottom:6px;">Tip income</h3>
+            <div class="table-wrap" style="margin-bottom:14px;">
+              <table>
+                <thead><tr><th>Payment ID</th><th>Order</th><th>Payment method</th><th class="num">Tip amount</th></tr></thead>
+                <tbody id="pool-src-tbody"></tbody>
+              </table>
+            </div>
+
+            <h3 style="font-size:14px; margin-bottom:6px;">Staff allocations</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Allocation ID</th><th>Employee</th><th>Role</th><th class="num">Amount</th></tr></thead>
+                <tbody id="pool-alloc-tbody"></tbody>
+              </table>
+            </div>
+            <p class="form-hint" id="allocation-basis"></p>
+            <button type="button" class="btn btn-primary" id="allocate" hidden>Allocate remaining tips</button>
+          </section>
+        </div>
+
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let selectedPoolId;
+
+      function postingBasis(posting) {
+        const parts = [];
+        if (posting.effective_minutes != null) parts.push(App.formatWorkMinutes(posting.effective_minutes));
+        if (posting.rounding_cent) parts.push("Includes " + App.formatMoney(posting.rounding_cent / 100) + " rounding adjustment");
+        parts.push(posting.allocated_at);
+        return App.escapeHtml(parts.join(" · "));
+      }
+
+      function render() {
+        const st = App.getState();
+
+        selectedPoolId ??= [...st.db.TIP_POOL].sort((a,b) => b.period_start.localeCompare(a.period_start))[0]?.pool_id;
+        document.getElementById("pool-tbody").innerHTML = [...st.db.TIP_POOL].sort((a,b) => b.period_start.localeCompare(a.period_start)).map((tp) => {
+          const allocs = st.db.TIP_ALLOCATION.filter((a) => a.pool_id === tp.pool_id);
+          const allocSum = App.round2(allocs.reduce((s, a) => s + Number(a.amount), 0));
+          const balanced = Math.round(allocSum * 100) === Math.round(tp.pool_total * 100);
+          return `
+            <tr style="cursor:pointer; ${tp.pool_id === selectedPoolId ? "background:#FFF8EA; font-weight:600;" : ""}" data-pid="${tp.pool_id}" class="pool-row">
+              <td class="mono">#${tp.pool_id}</td>
+              <td class="mono">${tp.period_start.slice(0, 16)} ~ ${tp.period_end.slice(11, 16)}</td>
+              <td class="num">${App.formatMoney(tp.pool_total)}</td>
+              <td class="num">${App.formatMoney(allocSum)}</td>
+              <td>${balanced ? '<span class="badge badge-ok">Balanced</span>' : '<span class="badge badge-warn">' + (allocSum < tp.pool_total ? "Unallocated" : "Overallocated — review") + '</span>'}</td>
+            </tr>
+          `;
+        }).join("");
+
+        document.querySelectorAll(".pool-row").forEach((tr) => {
+          tr.onclick = () => {
+            selectedPoolId = Number(tr.dataset.pid);
+            render();
+          };
+        });
+
+        // Selected pool detail
+        const pool = st.db.TIP_POOL.find((p) => p.pool_id === selectedPoolId) || st.db.TIP_POOL[0];
+        document.getElementById("pool-detail-title").textContent = `Tip pool #${pool.pool_id} details`;
+        document.getElementById("pool-detail-sub").textContent = `Period: ${pool.period_start} to ${pool.period_end} · Pool total: ${App.formatMoney(pool.pool_total)}`;
+
+        const {remaining,shares} = App.tipPlan(pool);
+        const button = document.getElementById("allocate");
+        button.hidden = remaining <= 0 || !shares.length;
+        button.onclick = () => App.businessAction(() => {
+          const result = App.allocateTips(pool.pool_id);
+          App.toast(result.ok ? "Tips allocated." : result.error, result.ok ? "ok" : "err");
+          render();
+        });
+        const basis = document.getElementById("allocation-basis");
+        basis.textContent = remaining > 0 ? "Unallocated " + App.formatMoney(remaining/100) + ". Servers and bartenders share tips in proportion to net hours from completed time entries. Remaining cents go to the largest fractional shares." +
+          (shares.length ? " " + shares.map(s => App.getEmployee(s.id).employee_name + " · " + App.formatWorkMinutes(s.minutes) + " · " + App.formatMoney(s.cents/100)).join("; ") : " No eligible time entries for this period.") : "";
+        const srcs = st.db.PAYMENT.filter((p) => p.pool_id === pool.pool_id);
+        document.getElementById("pool-src-tbody").innerHTML = srcs.length
+          ? srcs
+              .map(
+                (p) => `
+              <tr>
+                <td class="mono">#${p.payment_id}</td>
+                <td class="mono"><strong>#${p.order_id}</strong></td>
+                <td>${p.method}</td>
+                <td class="num">${App.formatMoney(p.tip_amount)}</td>
+              </tr>`
+              )
+              .join("")
+          : '<tr><td colspan="4" class="form-hint">No tips were received in this period.</td></tr>';
+
+        const allocs = st.db.TIP_ALLOCATION.filter((a) => a.pool_id === pool.pool_id);
+        document.getElementById("pool-alloc-tbody").innerHTML = allocs
+          .map((a) => {
+            const e = App.getEmployee(a.employee_id);
+            const r = e ? App.getRole(e.role_id) : null;
+            const details = a.installments ? `<details><summary>${App.countLabel(a.installments.length, "distribution")}</summary>${a.installments.map(p =>
+              `<div><small>${App.formatMoney(p.amount)} · ${postingBasis(p)}</small></div>`).join("")}</details>` : `<br><small>${postingBasis(a)}</small>`;
+            return `
+              <tr>
+                <td class="mono">#${a.allocation_id}</td>
+                <td>${e ? e.employee_name + " (#" + e.employee_id + ")" : "#" + a.employee_id}</td>
+                <td>${r ? r.role_name : "-"}</td>
+                <td class="num"><strong>${App.formatMoney(a.amount)}</strong>${details}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+      }
+
+      if (!App.initShell({
+        mode: "manager",
+        activePage: "manager-tips",
+
+        portalLabel: "Tip allocation",
+
+        dbRole: "manager",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

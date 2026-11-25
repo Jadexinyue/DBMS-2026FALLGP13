@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in or create an account — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <section class="between">
+      <div>
+        <h1 style="font-family:var(--font-serif); font-size:26px;">Sign in or create an account</h1>
+      </div>
+    </section>
+
+
+    <div class="grid-2">
+      <!-- Left: Login (Customer Phone + Staff ID tabs) -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Sign in</h2>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" id="tab-login-cust" type="button">Guest sign-in</button>
+          <button class="tab-btn" id="tab-login-staff" type="button">Staff sign-in</button>
+        </div>
+
+        <div id="login-alert" role="status" style="margin-bottom:12px;"></div>
+
+        <!-- Customer Login Form -->
+        <form id="form-cust-login">
+          <div class="form-group">
+            <label for="cust-phone">Phone number</label>
+            <input type="tel" id="cust-phone" autocomplete="username" placeholder="Enter your phone number" />
+          </div>
+          <div class="form-group">
+            <label for="cust-pass">Password</label>
+            <input type="password" id="cust-pass" autocomplete="current-password" placeholder="Enter your password" />
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" type="submit">Sign in</button>
+          </div>
+        </form>
+
+        <!-- Staff Login Form -->
+        <form id="form-staff-login" style="display:none;">
+          <div class="form-group">
+            <label for="staff-code">Employee ID</label>
+            <input type="text" id="staff-code" placeholder="Enter your employee ID" />
+          </div>
+          <div class="form-group">
+            <label for="staff-pass">Password</label>
+            <input type="password" id="staff-pass" autocomplete="current-password" placeholder="Enter your password" />
+          </div>
+          <button class="btn btn-primary" type="submit">Open my workspace</button>
+
+        </form>
+      </section>
+
+      <!-- Right: Customer Registration (11-25 updated spec + hand-drawn p.2 validation) -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Create a guest account</h2>
+          </div>
+        </div>
+
+        <div id="reg-alert" role="status" style="margin-bottom:12px;"></div>
+
+        <form id="form-register">
+          <div class="form-group">
+            <label for="reg-phone">Phone number *</label>
+            <input type="tel" id="reg-phone" placeholder="Include your country code, if applicable" />
+          </div>
+          <div class="form-group">
+            <label for="reg-name">Name or nickname *</label>
+            <input type="text" id="reg-name" placeholder="Enter your name or nickname" />
+          </div>
+          <div class="form-group">
+            <label for="reg-email">Email (optional)</label>
+            <input type="email" id="reg-email" placeholder="name@example.com" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reg-pass">Password *</label>
+              <input type="password" id="reg-pass" placeholder="At least 6 characters" />
+            </div>
+            <div class="form-group">
+              <label for="reg-pass2">Confirm password *</label>
+              <input type="password" id="reg-pass2" placeholder="Re-enter your password" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="font-weight:500; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="reg-join-loyalty" checked style="width:auto;" />
+              Join SmartDine Rewards and earn points on your meals
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="font-weight:500; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="reg-auto-login" checked style="width:auto;" />
+              Sign me in after registration
+            </label>
+          </div>
+          <button class="btn btn-gold" type="submit" style="width:100%;">Create account</button>
+        </form>
+      </section>
+    </div>
+
+  </main>
+
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/vendor/password-kdf.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+
+      const tabCust = document.getElementById("tab-login-cust");
+      const tabStaff = document.getElementById("tab-login-staff");
+      const formCust = document.getElementById("form-cust-login");
+      const formStaff = document.getElementById("form-staff-login");
+      const loginAlert = document.getElementById("login-alert");
+      const regAlert = document.getElementById("reg-alert");
+
+      function showBox(el, type, msg) {
+        el.innerHTML = `<div class="callout callout-${type}">${App.escapeHtml(msg)}</div>`;
+      }
+
+      tabCust.onclick = () => {
+        tabCust.classList.add("active");
+        tabStaff.classList.remove("active");
+        formCust.style.display = "";
+        formStaff.style.display = "none";
+        loginAlert.innerHTML = "";
+      };
+
+      tabStaff.onclick = () => {
+        tabStaff.classList.add("active");
+        tabCust.classList.remove("active");
+        formStaff.style.display = "";
+        formCust.style.display = "none";
+        loginAlert.innerHTML = "";
+      };
+
+      if (new URLSearchParams(location.search).get("role") === "staff") {
+        tabStaff.click();
+        showBox(loginAlert, "info", "Sign in with your staff account to open your workspace.");
+      }
+
+
+      // Customer Phone + Password Login
+      formCust.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const phone = document.getElementById("cust-phone").value.trim();
+        const pass = document.getElementById("cust-pass").value;
+        if (!phone && !pass) {
+          return showBox(loginAlert, "danger", "Enter your phone number and password to sign in.");
+        }
+        if (!phone || !pass) {
+          return showBox(loginAlert, "danger", "Both your phone number and password are required.");
+        }
+        const st = App.getState();
+        const cust = st.db.CUSTOMER.find((c) => App.phoneDigits(c.primary_phone) === App.phoneDigits(phone));
+        const matches = cust?.passwordDigest ? (await App.demoPasswordDigest(pass, cust.passwordSalt)) === cust.passwordDigest : cust?.password === pass;
+        if (!cust || !matches) {
+          return showBox(loginAlert, "danger", "Incorrect phone number or password.");
+        }
+        st.loggedInCustomer = { customer_id: cust.customer_id, name: cust.name, primary_phone: cust.primary_phone };
+        st.loggedInEmployee = null;
+        st.currentCustomerId = cust.customer_id;
+        App.commit(st);
+        showBox(loginAlert, "ok", `Welcome back, ${cust.name}. Opening your account…`);
+        setTimeout(() => (window.location.href = "customer-center.html"), 700);
+      });
+
+      // Staff ID + Password Login -> role-based redirect
+      formStaff.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const raw = document.getElementById("staff-code").value.trim().toUpperCase();
+        const pass = document.getElementById("staff-pass").value;
+        if (!raw && !pass) {
+          return showBox(loginAlert, "danger", "Enter your employee ID and password.");
+        }
+        const numId = Number(raw.replace(/^EMP/, ""));
+        const st = App.getState();
+        const emp = st.db.EMPLOYEE.find((x) => x.employee_id === numId);
+        if (!emp || emp.employment_status !== "Active" || emp.password !== pass) {
+          return showBox(loginAlert, "danger", "Incorrect employee ID or password.");
+        }
+        st.loggedInEmployee = { employee_id: emp.employee_id, employee_name: emp.employee_name, role_id: emp.role_id };
+        st.loggedInCustomer = null;
+        st.currentEmployeeId = emp.employee_id;
+        App.commit(st);
+
+        const destMap = {
+          1: "manager-dashboard.html",
+          2: "manager-dashboard.html",
+          3: emp.employee_id === 106 ? "cashier.html" : "server.html",
+          4: "host.html",
+          5: "kitchen.html",
+          6: "kitchen.html",
+        };
+        const dest = destMap[emp.role_id] || "staff-profile.html";
+          showBox(loginAlert, "ok", "Signed in. Opening your workspace…");
+        setTimeout(() => (window.location.href = dest), 700);
+      });
+
+      // Customer Registration (11-25 rules: phone unique, username non-unique, password confirm)
+      document.getElementById("form-register").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const phone = document.getElementById("reg-phone").value.trim();
+        const name = document.getElementById("reg-name").value.trim();
+        const email = document.getElementById("reg-email").value.trim();
+        const p1 = document.getElementById("reg-pass").value;
+        const p2 = document.getElementById("reg-pass2").value;
+        const joinLoyalty = document.getElementById("reg-join-loyalty").checked;
+        const autoLogin = document.getElementById("reg-auto-login").checked;
+
+        if (!phone && !name && !p1 && !p2) {
+          return showBox(regAlert, "danger", "Enter your phone number, name and password to create an account.");
+        }
+        if (!phone || !name || !p1 || !p2) {
+          return showBox(regAlert, "danger", "Enter your phone number and name, then enter and confirm your password.");
+        }
+        if (!/^\d{7,15}$/.test(App.phoneDigits(phone))) return showBox(regAlert, "danger", "Enter a valid phone number, including your country code if applicable.");
+        if (p1.length < 6) {
+          return showBox(regAlert, "danger", "Choose a password with at least 6 characters.");
+        }
+        if (p1 !== p2) {
+          return showBox(regAlert, "danger", "Your passwords do not match. Please try again.");
+        }
+
+        const st = App.getState();
+        if (st.db.CUSTOMER.some((c) => App.phoneDigits(c.primary_phone) === App.phoneDigits(phone))) {
+          return showBox(regAlert, "danger", "This phone number is already registered. Sign in or use a different number.");
+        }
+        if (email && st.db.CUSTOMER.some((c) => c.email && c.email.toLowerCase() === email.toLowerCase())) {
+          return showBox(regAlert, "danger", "This email is already in use.");
+        }
+
+        const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
+        const digest = await App.demoPasswordDigest(p1, salt);
+        return App.businessAction(() => {
+          const st = App.getState();
+          if (email && st.db.CUSTOMER.some(c => c.email?.toLowerCase() === email.toLowerCase())) return showBox(regAlert, "danger", "This email is already in use.");
+          if (st.db.CUSTOMER.some(c => App.phoneDigits(c.primary_phone) === App.phoneDigits(phone))) return showBox(regAlert, "danger", "This phone number is already registered.");
+          const newCid = App.nextId(st.db.CUSTOMER, "customer_id", 1051);
+          const newCust = {
+            customer_id: newCid,
+            name,
+            email: email || null,
+            primary_phone: phone,
+            legacy_extra_phones: [],
+            passwordSalt: salt,
+            passwordDigest: digest,
+          };
+          st.db.CUSTOMER.push(newCust);
+          st.db.CUSTOMER_PHONE.push({ customer_id: newCid, phone });
+
+          let memMsg = ". You can book a table or order by QR code as a guest";
+          if (joinLoyalty) {
+            const newMid = App.nextId(st.db.MEMBERSHIP, "membership_id", 3031);
+            st.db.MEMBERSHIP.push({
+              membership_id: newMid,
+              customer_id: newCid,
+              joined_at: App.nowStamp(),
+              member_status: "Active",
+              points_balance: 0,
+            });
+            memMsg = `. Your rewards account is #${newMid} with a starting balance of 0 points`;
+          }
+
+          if (autoLogin) {
+            st.loggedInCustomer = { customer_id: newCid, name, primary_phone: phone };
+            st.loggedInEmployee = null;
+            st.currentCustomerId = newCid;
+            App.commit(st);
+            showBox(regAlert, "ok", `Account created${memMsg}. Opening your account…`);
+            setTimeout(() => (window.location.href = "customer-center.html"), 900);
+          } else {
+            App.commit(st);
+            showBox(regAlert, "ok", `Account created${memMsg}. Sign in with your phone number and password.`);
+            document.getElementById("cust-phone").value = phone;
+            document.getElementById("form-register").reset();
+          }
+        });
+      });
+
+      App.initShell({
+        mode: "public",
+        activePage: "auth",
+
+        dbRole: "guest",
+      });
+    })();
+  </script>
+</body>
+</html>

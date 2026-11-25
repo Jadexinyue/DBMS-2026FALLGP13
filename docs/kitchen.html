@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kitchen station — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell" hidden>
+    <aside class="sidebar" id="sd-sidebar"></aside>
+    <div class="app-main">
+      <div class="topbar">
+        <div class="topbar-title">
+          <h1>Kitchen station</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" id="btn-toggle-view" type="button">View by order</button>
+        </div>
+      </div>
+
+      <main class="page-content stack">
+        <!-- Station Filter Tabs (5 PREP_STATIONs) -->
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Kitchen queue</h2>
+            </div>
+            <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="chk-show-served" style="width:auto;" /> Show served items
+            </label>
+          </div>
+
+          <div class="tabs" id="kds-station-tabs"></div>
+
+          <!-- View A: 3-column Per-Item Kanban (Spec P13) -->
+          <div class="kds-board" id="kds-kanban"></div>
+
+          <!-- View B: Grouped by Order (Hand-drawn p.8 compatibility toggle) -->
+          <div id="kds-order-view" style="display:none;" class="grid-3"></div>
+        </section>
+
+        <!-- Hand-drawn p.8 & p.9: Dish Popularity / Rating + Sold-out Sync + Dish Change Request Placeholder -->
+        <div class="grid-main-side">
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h2>Menu availability</h2>
+                <div class="card-sub">Sort by quantity sold, price or name. Availability requests go to a manager for approval.</div>
+              </div>
+              <select id="kds-dish-sort" style="width:160px;">
+                <option value="orders">Best sellers</option>
+                <option value="price">Highest price</option>
+                <option value="name">Item name</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Item</th><th>Station</th><th class="num">Quantity sold</th><th>Availability</th><th>Action</th></tr>
+                </thead>
+                <tbody id="kds-dishes-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <aside class="card">
+            <div class="card-header">
+              <div>
+                <h2>Menu requests</h2>
+              </div>
+            </div>
+
+            <form id="form-dish-req" style="margin-bottom:14px;">
+              <div class="form-group">
+                <label for="dr-type">Request type</label>
+                <select id="dr-type">
+                  <option value="Add item">Request a new item</option>
+                  <option value="Remove item">Request item removal</option>
+                  <option value="Stock alert">Report low stock or a sold-out item</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="dr-name">Item name *</label>
+                <input type="text" id="dr-name" placeholder="e.g. Smoky Honey Wings" />
+              </div>
+              <div class="form-group">
+                <label for="dr-ing">Ingredients or reason *</label>
+                <textarea id="dr-ing" rows="2" placeholder="List the ingredients and explain your request"></textarea>
+              </div>
+              <button class="btn btn-primary btn-sm" type="submit" style="width:100%;">Submit request</button>
+            </form>
+
+            <div id="dr-list" class="stack" style="gap:8px;"></div>
+          </aside>
+        </div>
+      </main>
+
+      <div id="sd-footer"></div>
+    </div>
+  </div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let activeStation = "ALL";
+      let groupByOrder = false;
+
+      function getOpenItems(includeServed) {
+        const st = App.getState();
+        return st.db.ORDER_ITEM.filter((i) => {
+          if (i.item_status === "CANCELLED") return false;
+          if (!includeServed && i.item_status === "SERVED") return false;
+          const mi = App.getMenuItem(i.menu_item_id);
+          if (activeStation !== "ALL" && mi && String(mi.station_id) !== String(activeStation)) return false;
+          // If showing served, limit to active/9003 orders so board stays legible
+          const sub = st.db.SUB_ORDER.find((s) => s.sub_order_id === i.sub_order_id);
+          if (!sub) return false;
+          const ord = st.db.ORDER.find((o) => o.order_id === sub.order_id);
+          if (!ord) return false;
+          if (i.item_status === "SERVED") return st.db.DINING_SESSION.some(s => s.session_id === ord.session_id && s.session_status === "Active");
+          return true;
+        });
+      }
+
+      function render() {
+        const st = App.getState();
+        const showServed = document.getElementById("chk-show-served").checked;
+
+        // Station tabs
+        const tabs = document.getElementById("kds-station-tabs");
+        const list = [{ station_id: "ALL", station_name: "All stations (5)" }, ...st.db.PREP_STATION];
+        tabs.innerHTML = list
+          .map(
+            (s) =>
+              `<button class="tab-btn ${String(activeStation) === String(s.station_id) ? "active" : ""}" data-sid="${s.station_id}" type="button">${s.station_name}</button>`
+          )
+          .join("");
+        tabs.querySelectorAll("button").forEach((b) => {
+          b.onclick = () => {
+            activeStation = b.dataset.sid;
+            render();
+          };
+        });
+
+        const items = getOpenItems(showServed);
+        const kanban = document.getElementById("kds-kanban");
+        const ordView = document.getElementById("kds-order-view");
+
+        if (!groupByOrder) {
+          kanban.style.display = "";
+          ordView.style.display = "none";
+          const cols = [
+            { key: "QUEUED", label: "Queued", next: "PREPARING", btn: "Start prep →" },
+            { key: "PREPARING", label: "Preparing", next: "READY", btn: "Mark ready" },
+            { key: "READY", label: "Ready to serve", next: "SERVED", btn: "Mark served" },
+          ];
+          if (showServed) cols.push({key:"SERVED", label:"Served"});
+          kanban.innerHTML = cols
+            .map((col) => {
+              const cItems = items.filter((i) => i.item_status === col.key);
+              const cards = cItems.length
+                ? cItems
+                    .map((i) => {
+                      const sub = st.db.SUB_ORDER.find((s) => s.sub_order_id === i.sub_order_id);
+                      const ord = sub ? st.db.ORDER.find((o) => o.order_id === sub.order_id) : null;
+                      const sess = ord ? st.db.DINING_SESSION.find((ds) => ds.session_id === ord.session_id) : null;
+                      const tbl = sess ? App.getTable(sess.table_id) : null;
+                      const mi = App.getMenuItem(i.menu_item_id);
+                      const sta = mi ? App.getStation(mi.station_id) : null;
+                      return `
+                        <div class="kds-ticket st-${i.item_status}">
+                          <div class="between" style="margin-bottom:5px;">
+                            <strong>${tbl ? tbl.table_number : "?"} · Order #${ord ? ord.order_id : "?"}</strong>
+                            <span class="mono form-hint">#${i.order_item_id}</span>
+                          </div>
+                          <div style="font-size:15px; font-weight:700; color:var(--espresso); margin-bottom:4px;">${mi ? mi.item_name : "#" + i.menu_item_id}</div>
+                          <div class="form-hint" style="margin-bottom:8px;">
+                            Station: ${sta ? sta.station_name : ""} · Round #${i.sub_order_id} · ${sub.channel === "QR_Code" ? "Tableside QR" : "Server POS"}<br/>
+                            ${i.notes ? `Notes: <strong>${App.escapeHtml(i.notes)}</strong>` : "No special instructions"}
+                          </div>
+                          ${col.key === "SERVED" ? "" : col.key === "READY" ? '<span class="form-hint">Awaiting table service</span>' : `<button class="btn btn-sm ${col.key === "PREPARING" ? "btn-ok" : "btn-primary"} kds-adv" data-id="${i.order_item_id}" data-next="${col.next}" type="button" style="width:100%;">${col.btn}</button>`}
+                        </div>
+                      `;
+                    })
+                    .join("")
+                : `<div class="form-hint" style="padding:18px 6px; text-align:center;">No items in this column.</div>`;
+
+              return `
+                <div class="kds-col">
+                  <div class="kds-col-head">
+                    <strong>${col.label}</strong>
+                    <span class="badge badge-burgundy">${cItems.length}</span>
+                  </div>
+                  ${cards}
+                </div>
+              `;
+            })
+            .join("");
+
+          kanban.querySelectorAll(".kds-adv").forEach((b) => {
+            b.onclick = () => App.businessAction(() => {
+              const result = App.advanceOrderItemStatus(Number(b.dataset.id), b.dataset.next);
+              App.toast(result.ok ? "Item status updated." : result.error, result.ok ? "ok" : "err");
+              render();
+            });
+          });
+        } else {
+          kanban.style.display = "none";
+          ordView.style.display = "";
+          const byOrder = new Map();
+          items.forEach((i) => {
+            const sub = st.db.SUB_ORDER.find((s) => s.sub_order_id === i.sub_order_id);
+            if (!sub) return;
+            if (!byOrder.has(sub.order_id)) byOrder.set(sub.order_id, []);
+            byOrder.get(sub.order_id).push(i);
+          });
+          ordView.innerHTML = byOrder.size
+            ? [...byOrder.entries()]
+                .map(([oid, list]) => {
+                  const ord = st.db.ORDER.find((o) => o.order_id === oid);
+                  const sess = ord ? st.db.DINING_SESSION.find((s) => s.session_id === ord.session_id) : null;
+                  const tbl = sess ? App.getTable(sess.table_id) : null;
+                  return `
+                    <div class="card">
+                      <div class="between" style="margin-bottom:8px;">
+                        <strong>Order #${oid} (${tbl ? tbl.table_number : ""})</strong>
+                        <span class="badge badge-warn">${App.countLabel(list.length, "item")}</span>
+                      </div>
+                      <div class="stack" style="gap:6px; margin-bottom:12px;">
+                        ${list.map((i) => `<div class="between" style="font-size:13px;"><span>${App.getMenuItem(i.menu_item_id).item_name}</span>${App.statusBadge(i.item_status)}</div>`).join("")}
+                      </div>
+                      ${list.some(i => i.item_status === "QUEUED" || i.item_status === "PREPARING") ? `<button class="btn btn-sm btn-ok kds-done-ord" data-oid="${oid}" type="button" style="width:100%;">Mark station items ready</button>` : ""}
+                    </div>
+                  `;
+                })
+                .join("")
+            : `<div class="callout callout-ok">All orders are ready.</div>`;
+
+          ordView.querySelectorAll(".kds-done-ord").forEach((b) => {
+            b.onclick = () => App.businessAction(() => {
+              const list = byOrder.get(Number(b.dataset.oid)) || [];
+              let count = 0;
+              for (const item of list) {
+                if (!["QUEUED","PREPARING"].includes(item.item_status)) continue;
+                if (item.item_status === "QUEUED" && !App.advanceOrderItemStatus(item.order_item_id, "PREPARING").ok) continue;
+                if (App.advanceOrderItemStatus(item.order_item_id, "READY").ok) count++;
+              }
+              App.toast(count ? `Front of house notified: ${App.countLabel(count, "item")} ready.` : "The item status has changed. Check the current queue.", count ? "ok" : "err");
+              render();
+            });
+          });
+        }
+
+        renderDishesTable();
+        renderDishRequests();
+      }
+
+      function renderDishesTable() {
+        const st = App.getState();
+        const counts = {};
+        st.db.ORDER_ITEM.filter(i => i.item_status !== "CANCELLED").forEach((i) => {
+          counts[i.menu_item_id] = (counts[i.menu_item_id] || 0) + 1;
+        });
+        const sortBy = document.getElementById("kds-dish-sort").value;
+        const list = [...st.db.MENU_ITEM].sort((a, b) => {
+          if (sortBy === "orders") return (counts[b.menu_item_id] || 0) - (counts[a.menu_item_id] || 0);
+          if (sortBy === "price") return b.current_price - a.current_price;
+          return a.item_name.localeCompare(b.item_name);
+        });
+
+        document.getElementById("kds-dishes-tbody").innerHTML = list
+          .map((m) => {
+            const cnt = counts[m.menu_item_id] || 0;
+            
+            const avail = m.availability === "Available";
+            return `
+              <tr>
+                <td class="mono">#${m.menu_item_id}</td>
+                <td><strong>${m.item_name}</strong></td>
+                <td>${App.getStation(m.station_id).station_name}</td>
+                <td class="num"><strong>${cnt}</strong></td>
+                
+                <td>${avail ? '<span class="badge badge-ok">Available</span>' : '<span class="badge badge-danger">Unavailable</span>'}</td>
+                <td>
+                  <button class="btn btn-sm ${avail ? "btn-danger" : "btn-ok"} toggle-avail" data-id="${m.menu_item_id}" type="button">${avail ? "Request suspension" : "Request reinstatement"}</button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        document.querySelectorAll(".toggle-avail").forEach((b) => {
+          b.onclick = () => {
+            const st2 = App.getState();
+            const m = st2.db.MENU_ITEM.find((x) => x.menu_item_id === Number(b.dataset.id));
+            if (m) {
+              if (st2.placeholders.dishRequests.some(r => r.menuId === m.menu_item_id && r.status === "Pending")) return App.toast("This item already has a pending request.", "err");
+              const target = m.availability === "Available" ? "Unavailable" : "Available";
+              st2.placeholders.dishRequests.unshift({
+                menuId: m.menu_item_id, target, type: target === "Available" ? "Restore availability" : "Suspend sales",
+                dish_name: m.item_name, ingredients: "", by: App.workingEmployee()?.employee_name || "Kitchen",
+                date: App.nowStamp().slice(0,10), status: "Pending"
+              });
+              App.commit(st2);
+              App.toast("Sent to the manager for approval.", "ok");
+              render();
+            }
+          };
+        });
+      }
+
+      function renderDishRequests() {
+        const st = App.getState();
+        document.getElementById("dr-list").innerHTML = st.placeholders.dishRequests
+          .map(
+            (r) => `
+          <div style="border:1px solid var(--border); border-radius:8px; padding:10px; font-size:12.5px;">
+            <div class="between"><strong>${r.type} · ${App.escapeHtml(r.dish_name)}</strong><span class="badge ${r.status === "Pending" ? "badge-warn" : "badge-ok"}">${r.status}</span></div>
+            <div class="form-hint" style="margin-top:4px;">${App.escapeHtml(r.ingredients)} · ${r.date}</div>
+          </div>`
+          )
+          .join("");
+      }
+
+      document.getElementById("btn-toggle-view").onclick = (e) => {
+        groupByOrder = !groupByOrder;
+        e.target.textContent = groupByOrder ? "View by station" : "View by order";
+        render();
+      };
+      document.getElementById("chk-show-served").addEventListener("change", render);
+      document.getElementById("kds-dish-sort").addEventListener("change", renderDishesTable);
+
+      document.getElementById("form-dish-req").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const type = document.getElementById("dr-type").value;
+        const name = document.getElementById("dr-name").value.trim();
+        const ing = document.getElementById("dr-ing").value.trim();
+        if (!name || !ing) return App.toast("Enter an item name and its ingredients or reason for the request.", "err");
+        const employee = App.workingEmployee();
+        if (!employee || employee.employment_status !== "Active") return App.toast("Please sign in again.", "err");
+        const st = App.getState();
+        st.placeholders.dishRequests.unshift({
+          id: "DR-0" + (st.placeholders.dishRequests.length + 1),
+          type,
+          dish_name: name,
+          ingredients: ing,
+          reason: ing,
+          by: `${employee.employee_name} (${employee.employee_id})`,
+          date: App.nowStamp().slice(0, 10),
+          status: "Pending",
+        });
+        App.commit(st);
+        document.getElementById("dr-name").value = "";
+        document.getElementById("dr-ing").value = "";
+        App.toast("Request submitted for manager approval.", "ok");
+        renderDishRequests();
+      });
+
+      if (!App.initShell({
+        mode: "staff",
+        activePage: "kitchen",
+
+        portalLabel: "Kitchen station",
+
+        dbRole: "kitchen",
+        onStateChange: render,
+      })) return;
+      render();
+    })();
+  </script>
+</body>
+</html>

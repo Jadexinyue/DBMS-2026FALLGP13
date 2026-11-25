@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reservations — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <section class="between">
+      <div>
+        <h1 style="font-family:var(--font-serif); font-size:26px;">Book a table</h1>
+        <p class="card-sub">Choose a date, time and party size. Our host will seat your party when you arrive.</p>
+      </div>
+    </section>
+
+    <div class="grid-main-side">
+      <!-- Left: Query & Cancel Reservations -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>My reservations</h2>
+            <div class="card-sub">View or cancel a reservation.</div>
+          </div>
+          <div class="row">
+            <input type="text" id="res-search" placeholder="Search by reservation number or name" style="width:230px;" />
+            <select id="res-status" style="width:130px;">
+              <option value="ALL">All statuses</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Reservation</th>
+                <th>Contact</th>
+                <th>Reserved for</th>
+                <th>Party size</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="res-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right: Create New Reservation -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Book a table</h2>
+            <div class="card-sub">Guests can book without an account. Availability is checked when you submit.</div>
+          </div>
+        </div>
+
+        <div id="res-alert" style="margin-bottom:12px;"></div>
+
+        <form id="form-reservation">
+          <div class="form-group">
+            <label for="r-name">Guest name *</label>
+            <input type="text" id="r-name" placeholder="e.g. Alex Chen" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="r-date">Date *</label>
+              <input type="date" id="r-date" />
+            </div>
+            <div class="form-group">
+              <label for="r-time">Time *</label>
+              <select id="r-time">
+                <option value="12:00:00">12:00 PM · Lunch</option>
+                <option value="13:00:00">1:00 PM · Lunch</option>
+                <option value="14:00:00">2:00 PM · Lunch</option>
+                <option value="18:00:00" selected>6:00 PM · Dinner</option>
+                <option value="19:00:00">7:00 PM · Peak dinner</option>
+                <option value="20:00:00">8:00 PM · Dinner</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="r-party">Party size (1–8) *</label>
+              <input type="number" id="r-party" min="1" max="8" value="4" />
+            </div>
+            <div class="form-group">
+              <label for="r-phone">Contact number *</label>
+              <input type="tel" id="r-phone" placeholder="+1-555-200-xxxx" />
+            </div>
+          </div>
+          <div class="callout callout-info" style="margin-bottom:14px;">
+            Each table seats up to eight. Our host will assign your table on arrival.
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%;">Book table</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      const tbody = document.getElementById("res-tbody");
+      const searchEl = document.getElementById("res-search");
+      const statusEl = document.getElementById("res-status");
+      const alertEl = document.getElementById("res-alert");
+
+      const dateField = document.getElementById("r-date");
+      const day = App.nowStamp().slice(0,10);
+      dateField.min = day;
+      dateField.value = day;
+      const timeField = document.getElementById("r-time");
+      function selectAvailableSlot() {
+        const now = App.nowStamp();
+        for (const opt of timeField.options) opt.disabled = dateField.value + " " + opt.value <= now;
+        const first = [...timeField.options].find(opt => !opt.disabled);
+        timeField.value = first?.value || "";
+        return Boolean(first);
+      }
+      if (!selectAvailableSlot()) {
+        const nextDay = new Date(day + "T12:00:00");
+        nextDay.setDate(nextDay.getDate() + 1);
+        dateField.value = [nextDay.getFullYear(), String(nextDay.getMonth()+1).padStart(2,"0"), String(nextDay.getDate()).padStart(2,"0")].join("-");
+        selectAvailableSlot();
+      }
+      dateField.onchange = () => {
+        alertEl.innerHTML = selectAvailableSlot() ? "" : '<div class="callout callout-warn">No time slots remain for this date. Choose another day.</div>';
+      };
+      function canView(r, st) {
+        return st.loggedInCustomer ? r.customer_id === st.loggedInCustomer.customer_id : r.guestBooking === true;
+      }
+      function render() {
+        const st = App.getState();
+        const kw = searchEl.value.trim().toLowerCase();
+        const sf = statusEl.value;
+
+        const list = [...st.db.RESERVATION]
+          .sort((a, b) => b.reservation_id - a.reservation_id)
+          .filter((r) => {
+            if (!canView(r, st)) return false;
+            if (sf !== "ALL" && r.status !== sf) return false;
+            if (kw && !String(r.reservation_id).includes(kw) && !r.contact_name.toLowerCase().includes(kw)) return false;
+            return true;
+          });
+
+        tbody.innerHTML = !list.length ? '<tr><td colspan="6">No matching reservations.</td></tr>' : list
+          .map((r) => {
+            const sess = st.db.DINING_SESSION.find((s) => s.reservation_id === r.reservation_id);
+            const tbl = sess ? App.getTable(sess.table_id) : null;
+            let actionHtml = `<span class="form-hint">—</span>`;
+            if (r.status === "Confirmed") {
+              actionHtml = `<button class="btn btn-sm btn-danger cancel-res-btn" data-id="${r.reservation_id}">Cancel reservation</button>`;
+            } else if (sess) {
+              actionHtml = `<span class="badge badge-info">Seated ${tbl ? tbl.table_number : ""}</span>`;
+            }
+            return `
+              <tr>
+                <td class="mono"><strong>#${r.reservation_id}</strong></td>
+                <td>${App.escapeHtml(r.contact_name)}</td>
+                <td class="mono">${r.reserved_for}</td>
+                <td>${App.countLabel(r.party_size, "guest")}</td>
+                <td>${App.statusBadge(r.status)}</td>
+                <td>${actionHtml}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        tbody.querySelectorAll(".cancel-res-btn").forEach((btn) => {
+          btn.onclick = () => {
+            const st2 = App.getState();
+            const rec = st2.db.RESERVATION.find((x) => x.reservation_id === Number(btn.dataset.id));
+            if (rec?.status === "Confirmed" && canView(rec, st2)) {
+              rec.status = "Cancelled";
+              App.commit(st2);
+              App.toast(`Reservation #${rec.reservation_id} cancelled.`, "ok");
+              render();
+            }
+          };
+        });
+      }
+
+      document.getElementById("form-reservation").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("r-name").value.trim();
+        const date = document.getElementById("r-date").value;
+        const time = document.getElementById("r-time").value;
+        const party = Number(document.getElementById("r-party").value);
+        if (!name || !date || !party) {
+          alertEl.innerHTML = `<div class="callout callout-danger">Enter the guest name, date and party size.</div>`;
+          return;
+        }
+        if (party < 1 || party > 8) {
+          alertEl.innerHTML = `<div class="callout callout-danger">Party size must be between 1 and 8.</div>`;
+          return;
+        }
+        const phone = document.getElementById("r-phone").value.trim();
+        if (!/^\d{7,15}$/.test(App.phoneDigits(phone))) {
+          alertEl.innerHTML = '<div class="callout callout-danger" role="alert">Enter a valid contact number so we can confirm your reservation.</div>';
+          return;
+        }
+        if (!time || date + " " + time <= App.nowStamp()) {
+          alertEl.innerHTML = '<div class="callout callout-danger" role="alert">Choose a time slot that has not started yet.</div>';
+          return;
+        }
+        const slot = `${date} ${time}`;
+        const st = App.getState();
+        const booked = st.db.RESERVATION.filter((r) => r.reserved_for === slot && r.status === "Confirmed").reduce(
+          (s, r) => s + Number(r.party_size),
+          0
+        );
+        if (booked + party > 40) {
+          alertEl.innerHTML = `<div class="callout callout-danger">Time slot ${slot} already has ${App.countLabel(booked, "guest")} booked. There is not enough room for this party.</div>`;
+          return;
+        }
+        const newId = App.nextId(st.db.RESERVATION, "reservation_id", 4036);
+        const rec = {
+          reservation_id: newId,
+          customer_id: st.loggedInCustomer ? st.loggedInCustomer.customer_id : null,
+          contact_name: name,
+          contact_phone: phone,
+          guestBooking: !st.loggedInCustomer,
+          reserved_for: slot,
+          party_size: party,
+          status: "Confirmed",
+        };
+        st.db.RESERVATION.push(rec);
+        App.commit(st);
+        alertEl.innerHTML = `<div class="callout callout-ok">Reservation confirmed! Your number is <strong>#${newId}</strong> (${slot} · ${App.countLabel(party, "guest")}). Give the host your reservation number or name when you arrive.</div>`;
+        App.toast(`Reservation #${newId} created and sent to the host.`, "ok");
+        document.getElementById("r-name").value = "";
+        searchEl.value = "";
+        statusEl.value = "ALL";
+        render();
+      });
+
+      searchEl.addEventListener("input", render);
+      statusEl.addEventListener("change", render);
+
+      App.initShell({
+        mode: "public",
+        activePage: "reservations",
+
+        dbRole: "guest",
+        onStateChange: render,
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

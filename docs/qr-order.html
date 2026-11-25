@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tableside menu — SmartDine</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="sd-header"></div>
+
+  <main class="container stack">
+    <!-- Active QR Session Strip (FR-O02 / §8.1: must display table & active session) -->
+    <section class="card" style="background:linear-gradient(135deg, #2B1814, #4A1C21); color:#FFF8F0; border:none;">
+      <div class="between">
+        <div>
+          <div style="font-size:12px; color:#F2CA8A; font-weight:600; letter-spacing:0.04em;">Tableside QR</div>
+          <h1 style="font-family:var(--font-serif); font-size:24px; color:#FFF; margin-top:4px;" id="qr-session-headline">Loading table…</h1>
+          <div style="font-size:13px; color:#E8D5C9; margin-top:4px;" id="qr-session-sub"></div>
+        </div>
+        <div class="row">
+          <button class="btn btn-gold" id="btn-open-qr-modal" type="button">Enter table code</button>
+          <a class="btn btn-secondary" href="customer-center.html">Track order</a>
+        </div>
+      </div>
+    </section>
+
+    <div id="qr-guard-alert"></div>
+
+    <div class="grid-main-side">
+      <!-- Left: Menu Grid -->
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Choose your dishes</h2>
+            <div class="card-sub">Order in as many rounds as you like. Items you add and items ordered through your server appear on the same bill.</div>
+          </div>
+          <input type="text" id="qr-search" placeholder="Search menu items…" style="width:200px;" />
+        </div>
+
+        <div class="tabs" id="qr-cat-tabs"></div>
+        <div class="menu-grid" id="qr-menu-grid"></div>
+      </section>
+
+      <!-- Right: Current Round Cart + Existing Rounds on this Table -->
+      <aside class="stack">
+        <section class="card" id="round-cart" tabindex="-1">
+          <div class="card-header">
+            <div>
+              <h2>Your cart</h2>
+              <div class="card-sub">When you place this order, the kitchen will receive your items and notes.</div>
+            </div>
+            <span class="badge badge-burgundy" id="cart-count-badge">0 items</span>
+          </div>
+
+          <div id="cart-items-list" class="stack" style="gap:10px; margin-bottom:14px;"></div>
+
+          <div class="form-group">
+            <label for="cart-note">Special instructions</label>
+            <input type="text" id="cart-note" placeholder="e.g. No onions, extra crispy or less salt" />
+          </div>
+
+          <div class="between" style="padding:10px 0; border-top:1px solid var(--border); margin-bottom:12px;">
+            <span>Round subtotal (before 8% tax)</span>
+            <strong style="font-size:18px; color:var(--burgundy);" id="cart-subtotal">$0.00</strong>
+          </div>
+
+          <button class="btn btn-primary" id="btn-submit-qr" type="button" style="width:100%;">
+            Place order
+          </button>
+        </section>
+
+        <!-- Current Table Submitted Rounds -->
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h3>Items ordered at this table</h3>
+              <div class="card-sub">Includes items ordered by you and your server.</div>
+            </div>
+            <a class="btn btn-sm btn-ok" id="qr-checkout" href="cashier.html?mode=self">Check out →</a>
+          </div>
+          <div id="table-rounds-box" class="stack" style="gap:10px;"></div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <!-- Modal: Simulate QR Scan / Table Verification (Bridges hand-drawn p.4 table selection + spec FR-O02) -->
+  <div class="modal-backdrop" id="qr-modal">
+    <div class="modal-box">
+      <div class="card-header">
+        <div>
+          <h2>Enter table code</h2>
+          <div class="card-sub">Enter the full code printed on your table.</div>
+        </div>
+        <button class="btn btn-sm btn-secondary" id="btn-close-qr-modal" type="button">Close</button>
+      </div>
+      <div id="qr-modal-msg" style="margin-bottom:12px;"></div>
+      <form id="table-code-form" class="stack"><label for="table-code">Table code</label><input id="table-code" type="text" required autocomplete="off" placeholder="Code printed on your table"><button class="btn btn-primary" type="submit">Confirm table</button></form>
+    </div>
+  </div>
+
+  <!-- Modal: Order Submitted Confirmation (Hand-drawn p.4 "Order confirmation" popup) -->
+  <div class="modal-backdrop" id="done-modal">
+    <div class="modal-box" style="max-width:440px; text-align:center;">
+      <div style="font-size:40px; margin-bottom:6px;">✅</div>
+      <h2 style="font-family:var(--font-serif); margin-bottom:6px;">Order sent to the kitchen</h2>
+      <p class="card-sub" id="done-modal-detail" style="margin-bottom:16px;"></p>
+      <div class="row" style="justify-content:center;">
+        <a class="btn btn-primary" href="customer-center.html">Track your order</a>
+        <button class="btn btn-ghost" id="btn-close-done" type="button">Continue ordering</button>
+      </div>
+    </div>
+  </div>
+
+  <a href="#round-cart" id="cart-shortcut" class="cart-shortcut" hidden>View cart</a>
+  <div id="sd-footer"></div>
+
+  <script src="assets/js/sql-seed.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    (function () {
+      const App = window.SmartDineApp;
+      let activeCat = "ALL";
+      let searchKw = "";
+      let cart = []; // [{ menu_item_id, qty }]
+
+      const modal = document.getElementById("qr-modal");
+      const doneModal = document.getElementById("done-modal");
+
+      const request = new URLSearchParams(location.search);
+      const requestedTable = Number(request.get("table"));
+      if (requestedTable) {
+        App.bindQrTable(requestedTable, request.has("session") ? Number(request.get("session")) : undefined);
+      }
+      const requestedDish = App.getMenuItem(Number(request.get("dish")));
+      if (requestedDish) {
+        searchKw = requestedDish.item_name;
+        document.getElementById("qr-search").value = searchKw;
+      }
+      let cartSession = App.qrSession()?.session_id;
+      const shortcut = document.getElementById("cart-shortcut");
+      const cartPanel = document.getElementById("round-cart");
+      new IntersectionObserver(([entry]) => {
+        shortcut.classList.toggle("cart-in-view", entry.isIntersecting);
+      }).observe(cartPanel);
+      function renderSessionBar() {
+        const st = App.getState();
+        const tbl = App.getTable(App.qrBinding().tableId);
+        const bound = App.qrSession();
+        const sess = bound?.session_status === "Active" ? bound : null;
+        if (cartSession !== sess?.session_id) {
+          cart = [];
+          document.getElementById("cart-note").value = "";
+          cartSession = sess?.session_id;
+        }
+        const ord = sess ? App.getOrderForSession(sess.session_id) : null;
+
+        const hl = document.getElementById("qr-session-headline");
+        const sub = document.getElementById("qr-session-sub");
+        const guard = document.getElementById("qr-guard-alert");
+        const submitBtn = document.getElementById("btn-submit-qr");
+
+        if (sess && (!ord || ord.order_status !== "Paid")) {
+          hl.textContent = `${tbl.table_number} · ${App.countLabel(sess.guest_count, "guest")}`;
+          sub.textContent = ord
+            ? `Visit #${sess.session_id} · Order #${ord.order_id} · Add more items at any time.`
+            : `Visit #${sess.session_id} · Ready to order.`;
+          guard.innerHTML = "";
+          submitBtn.disabled = false;
+        } else if (sess && ord && ord.order_status === "Paid") {
+          hl.textContent = `${tbl.table_number} · Paid`;
+          sub.textContent = `Order #${ord.order_id} has been paid. Ordering is closed for this visit.`;
+          guard.innerHTML = `<div class="callout callout-info">You can <a href="cashier.html?mode=self&order=${ord.order_id}">view your receipt</a> and leave a review in My dining after departure.</div>`;
+          submitBtn.disabled = true;
+        } else {
+          hl.textContent = `${tbl ? tbl.table_number + " · Ordering unavailable" : App.qrBinding().tableId ? "Invalid table code" : "Scan the code on your table"}`;
+          sub.textContent = "After you’re seated, scan the QR code or enter the code printed on your table.";
+          guard.innerHTML = App.qrBinding().tableId ? '<div class="callout callout-warn">Ask the host to check your table. If you have moved, scan the code at your new table.</div>' : "";
+          submitBtn.disabled = true;
+        }
+
+        const checkout = document.getElementById("qr-checkout");
+        checkout.hidden = !ord;
+        checkout.href = ord ? "cashier.html?mode=self&order=" + ord.order_id : "cashier.html?mode=self";
+        renderRounds(ord);
+      }
+
+      function renderRounds(ord) {
+        const box = document.getElementById("table-rounds-box");
+        if (!ord) {
+          box.innerHTML = `<div class="form-hint">No items have been ordered yet.</div>`;
+          return;
+        }
+        const subs = App.getSubOrdersForOrder(ord.order_id);
+        const sum = App.calcOrderSummary(ord.order_id);
+        box.innerHTML =
+          subs
+            .map((s, idx) => {
+              const items = sum.items.filter((i) => i.sub_order_id === s.sub_order_id);
+              const emp = s.employee_id ? App.getEmployee(s.employee_id) : null;
+              const rows = items
+                .map((it) => {
+                  const mi = App.getMenuItem(it.menu_item_id);
+                  return `<div class="between" style="font-size:12.5px; padding:3px 0;">
+                    <span>${mi ? mi.item_name : "#" + it.menu_item_id} ${it.notes ? `<em style="color:var(--text-muted);">(${App.escapeHtml(it.notes)})</em>` : ""}</span>
+                    <span>${App.statusBadge(it.item_status)}</span>
+                  </div>`;
+                })
+                .join("");
+              return `
+                <div style="border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:var(--surface-muted);">
+                  <div class="between" style="margin-bottom:6px;">
+                    <strong>Round ${idx + 1} · Round ID #${s.sub_order_id}</strong>
+                    <span class="badge ${s.channel === "QR_Code" ? "badge-burgundy" : "badge-gold"}">${s.channel === "QR_Code" ? "Guest QR" : "Staff POS · " + (emp ? emp.employee_name : s.employee_id)}</span>
+                  </div>
+                  ${rows}
+                </div>
+              `;
+            })
+            .join("") +
+          `<div class="between" style="padding-top:8px; border-top:1px solid var(--border); font-size:13.5px;">
+            <span>Order #${ord.order_id} Total with tax</span>
+            <strong style="color:var(--burgundy);">${App.formatMoney(sum.totalBeforeTip)}</strong>
+          </div>`;
+      }
+
+      function renderMenu() {
+        const st = App.getState();
+        const tabs = document.getElementById("qr-cat-tabs");
+        const cats = [{ category_id: "ALL", category_name: "All" }, ...st.db.MENU_CATEGORY];
+        tabs.innerHTML = cats
+          .map(
+            (c) =>
+              `<button class="tab-btn ${String(activeCat) === String(c.category_id) ? "active" : ""}" data-cat="${c.category_id}" type="button">${c.category_name}</button>`
+          )
+          .join("");
+        tabs.querySelectorAll("button").forEach((b) => {
+          b.onclick = () => {
+            activeCat = b.dataset.cat;
+            renderMenu();
+          };
+        });
+
+        const kw = searchKw.trim().toLowerCase();
+        const list = st.db.MENU_ITEM.filter((m) => {
+          if (activeCat !== "ALL" && String(m.category_id) !== String(activeCat)) return false;
+          if (kw && !m.item_name.toLowerCase().includes(kw)) return false;
+          return true;
+        });
+
+        document.getElementById("qr-menu-grid").innerHTML = list
+          .map((m) => {
+            const cat = App.getCategory(m.category_id);
+            const soldOut = m.availability !== "Available";
+            const inCart = cart.find((c) => c.menu_item_id === m.menu_item_id);
+            return `
+              <article class="dish-card ${soldOut ? "soldout" : ""}">
+                <div class="dish-img-wrap">
+                  <img src="${m.image}" alt="${m.item_name}" loading="lazy" />
+                </div>
+                <div class="dish-body">
+                  <div class="dish-cat">${cat ? cat.category_name : ""}</div>
+                  <div class="dish-name">${m.item_name}</div>
+                  <div class="dish-footer">
+                    <span class="dish-price">${App.formatMoney(m.current_price)}</span>
+                    ${
+                      soldOut
+                        ? '<span class="badge badge-danger">Unavailable</span>'
+                        : `<button class="btn btn-sm btn-primary add-cart-btn" ${document.getElementById("btn-submit-qr").disabled ? "disabled" : ""} data-id="${m.menu_item_id}" type="button">+ Add${inCart ? " (" + inCart.qty + ")" : ""}</button>`
+                    }
+                  </div>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+
+        if (!list.length) document.getElementById("qr-menu-grid").textContent = "No matching menu items.";
+        document.querySelectorAll(".add-cart-btn").forEach((btn) => {
+          btn.onclick = () => {
+            const id = Number(btn.dataset.id);
+            const found = cart.find((c) => c.menu_item_id === id);
+            if (found && found.qty >= 99) return App.toast("You can order up to 99 of each item.", "err");
+            if (found) found.qty += 1;
+            else cart.push({ menu_item_id: id, qty: 1 });
+            renderCart();
+            renderMenu();
+          };
+        });
+      }
+
+      function renderCart() {
+        const listEl = document.getElementById("cart-items-list");
+        const countEl = document.getElementById("cart-count-badge");
+        const subEl = document.getElementById("cart-subtotal");
+        const totalQty = cart.reduce((s, c) => s + c.qty, 0);
+        countEl.textContent = `${App.countLabel(totalQty, "item")}`;
+        shortcut.hidden = !totalQty || document.getElementById("btn-submit-qr").disabled;
+        shortcut.textContent = `View cart · ${App.countLabel(totalQty, "item")}`;
+
+        if (!cart.length) {
+          listEl.innerHTML = `<div class="form-hint" style="padding:12px 0;">Your cart is empty. Choose a dish to start this round.</div>`;
+          subEl.textContent = "$0.00";
+          return;
+        }
+
+        let sum = 0;
+        listEl.innerHTML = cart
+          .map((c) => {
+            const mi = App.getMenuItem(c.menu_item_id);
+            const line = mi ? mi.current_price * c.qty : 0;
+            sum += line;
+            return `
+              <div class="between" style="padding:8px 10px; border:1px solid var(--border); border-radius:8px;">
+                <div>
+                  <div style="font-weight:600; font-size:13.5px;">${mi ? mi.item_name : "#" + c.menu_item_id}</div>
+                  <div class="form-hint">${App.formatMoney(mi ? mi.current_price : 0)} × ${c.qty}</div>
+                </div>
+                <div class="row" style="gap:5px;">
+                  <button class="btn btn-sm btn-secondary qty-dec" data-id="${c.menu_item_id}" type="button">-</button>
+                  <strong>${c.qty}</strong>
+                  <button class="btn btn-sm btn-secondary qty-inc" data-id="${c.menu_item_id}" type="button">+</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+        subEl.textContent = App.formatMoney(sum);
+
+        listEl.querySelectorAll(".qty-dec").forEach((b) => {
+          b.onclick = () => {
+            const id = Number(b.dataset.id);
+            const it = cart.find((c) => c.menu_item_id === id);
+            if (it) {
+              it.qty -= 1;
+              if (it.qty <= 0) cart = cart.filter((c) => c.menu_item_id !== id);
+            }
+            renderCart();
+            renderMenu();
+          };
+        });
+        listEl.querySelectorAll(".qty-inc").forEach((b) => {
+          b.onclick = () => {
+            const id = Number(b.dataset.id);
+            const it = cart.find((c) => c.menu_item_id === id);
+            if (it && it.qty >= 99) return App.toast("You can order up to 99 of each item.", "err");
+            if (it) it.qty += 1;
+            renderCart();
+            renderMenu();
+          };
+        });
+      }
+
+      document.getElementById("btn-submit-qr").onclick = () => {
+        const st = App.getState();
+        const note = document.getElementById("cart-note").value.trim();
+        const payload = cart.map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty, notes: note || null }));
+        const res = App.submitSubOrder({
+          tableId: App.qrBinding().tableId,
+          sessionId: cartSession || -1,
+          channel: "QR_Code",
+          employeeId: null,
+          cartItems: payload,
+        });
+        if (!res.ok) {
+          App.toast(res.error, "err");
+          return;
+        }
+        const tbl = App.getTable(App.qrBinding().tableId);
+        cart = [];
+        document.getElementById("cart-note").value = "";
+        renderCart();
+        renderMenu();
+        renderSessionBar();
+        document.getElementById("done-modal-detail").textContent =
+          `Table ${tbl.table_number} · Order #${res.orderId} · Sent to kitchen: ${App.countLabel(res.count, "item")}.`;
+        doneModal.classList.add("open");
+      };
+
+      // QR Table Selector Modal (Bridges hand-drawn p.4 + spec FR-O02)
+      function openQrModal() {
+        document.getElementById("table-code-form").reset();
+        document.getElementById("qr-modal-msg").textContent = "";
+        modal.classList.add("open");
+      }
+
+      document.getElementById("table-code-form").onsubmit = event => {
+        event.preventDefault();
+        const code = document.getElementById("table-code").value.trim().toUpperCase();
+        const table = App.getState().db.RESTAURANT_TABLE.find(t => t.qr_code === code);
+        const session = table && App.getActiveSessionForTable(table.table_id);
+        if (!session || App.getOrderForSession(session.session_id)?.order_status === "Paid") {
+          document.getElementById("qr-modal-msg").textContent = "This table has not been opened or has already paid. Please check with the host.";
+          return;
+        }
+        App.bindQrTable(table.table_id, session.session_id);
+        const url = new URL(location.href);
+        url.searchParams.set("table", table.table_id);
+        url.searchParams.set("session", session.session_id);
+        if (location.protocol === "file:") {
+          if (url.href !== location.href) { location.replace(url.href); return; }
+        } else {
+          history.replaceState(null, "", url.href);
+        }
+        modal.classList.remove("open");
+        refreshAll();
+      };
+      document.getElementById("btn-open-qr-modal").onclick = openQrModal;
+      document.getElementById("btn-close-qr-modal").onclick = () => modal.classList.remove("open");
+      document.getElementById("btn-close-done").onclick = () => doneModal.classList.remove("open");
+      document.getElementById("qr-search").addEventListener("input", (e) => {
+        searchKw = e.target.value;
+        renderMenu();
+      });
+
+      function refreshAll() {
+        renderSessionBar();
+        renderMenu();
+        renderCart();
+      }
+
+      App.initShell({
+        mode: "public",
+        activePage: "qr-order",
+
+        dbRole: "guest",
+        onStateChange: refreshAll,
+      });
+      refreshAll();
+    })();
+  </script>
+</body>
+</html>
