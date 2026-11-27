@@ -19,7 +19,7 @@
           <div style="font-size:13px; color:#E8D5C9; margin-top:4px;" id="qr-session-sub"></div>
         </div>
         <div class="row">
-          <button class="btn btn-gold" id="btn-open-qr-modal" type="button">Enter table code</button>
+          <button class="btn btn-gold" id="btn-open-qr-modal" type="button">Enter table number</button>
           <a class="btn btn-secondary" href="customer-center.html">Track order</a>
         </div>
       </div>
@@ -90,13 +90,16 @@
     <div class="modal-box">
       <div class="card-header">
         <div>
-          <h2>Enter table code</h2>
-          <div class="card-sub">Enter the full code printed on your table.</div>
+          <h2>Enter table number</h2>
         </div>
         <button class="btn btn-sm btn-secondary" id="btn-close-qr-modal" type="button">Close</button>
       </div>
-      <div id="qr-modal-msg" style="margin-bottom:12px;"></div>
-      <form id="table-code-form" class="stack"><label for="table-code">Table code</label><input id="table-code" type="text" required autocomplete="off" placeholder="Code printed on your table"><button class="btn btn-primary" type="submit">Confirm table</button></form>
+      <div id="qr-modal-msg" role="status" style="margin-bottom:12px;"></div>
+      <form id="table-code-form" class="stack">
+        <label for="table-code">Table number</label>
+        <input id="table-code" type="text" inputmode="numeric" required autocomplete="off" placeholder="e.g. 1">
+        <button class="btn btn-primary" type="submit">Confirm table</button>
+      </form>
     </div>
   </div>
 
@@ -174,8 +177,8 @@
           guard.innerHTML = `<div class="callout callout-info">You can <a href="cashier.html?mode=self&order=${ord.order_id}">view your receipt</a> and leave a review in My dining after departure.</div>`;
           submitBtn.disabled = true;
         } else {
-          hl.textContent = `${tbl ? tbl.table_number + " · Ordering unavailable" : App.qrBinding().tableId ? "Invalid table code" : "Scan the code on your table"}`;
-          sub.textContent = "After you’re seated, scan the QR code or enter the code printed on your table.";
+          hl.textContent = `${tbl ? tbl.table_number + " · Ordering unavailable" : App.qrBinding().tableId ? "Invalid table code" : "Choose your table"}`;
+          sub.textContent = "Once seated, enter your table number or scan its QR code.";
           guard.innerHTML = App.qrBinding().tableId ? '<div class="callout callout-warn">Ask the host to check your table. If you have moved, scan the code at your new table.</div>' : "";
           submitBtn.disabled = true;
         }
@@ -383,13 +386,19 @@
         document.getElementById("table-code-form").reset();
         document.getElementById("qr-modal-msg").textContent = "";
         modal.classList.add("open");
+        document.getElementById("table-code").focus();
       }
 
       document.getElementById("table-code-form").onsubmit = event => {
         event.preventDefault();
         const code = document.getElementById("table-code").value.trim().toUpperCase();
-        const table = App.getState().db.RESTAURANT_TABLE.find(t => t.qr_code === code);
-        const session = table && App.getActiveSessionForTable(table.table_id);
+        const tableNumber = /^\d+$/.test(code) ? "T" + String(Number(code)).padStart(2, "0") : code;
+        const table = App.getState().db.RESTAURANT_TABLE.find(t => t.table_number === tableNumber || t.qr_code === code);
+        if (!table) {
+          document.getElementById("qr-modal-msg").textContent = "Table not found. Check the number on your table.";
+          return;
+        }
+        const session = App.getActiveSessionForTable(table.table_id);
         if (!session || App.getOrderForSession(session.session_id)?.order_status === "Paid") {
           document.getElementById("qr-modal-msg").textContent = "This table has not been opened or has already paid. Please check with the host.";
           return;
